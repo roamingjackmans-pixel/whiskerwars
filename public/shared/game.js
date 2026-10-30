@@ -610,14 +610,15 @@ export class Game {
           this.players[b.owner].stats.produced += add;
         }
       }
-      // towers
+      // towers (an unowned tower shoots at everyone's cats until somebody takes it)
       const shooter = def.range || this.fx(b, 'turret');
-      if (shooter && b.owner >= 0 && b.count >= 1 && !this.fx(b, 'disabled') && !(this.players[b.owner].eclipsed > t)) {
+      const stray = b.owner < 0;
+      if (shooter && (!stray || b.type === 'tower') && b.count >= 1 && !this.fx(b, 'disabled') && !(!stray && this.players[b.owner].eclipsed > t)) {
         b.fireCd -= dt;
         if (b.fireCd <= 0) {
           let range = def.range ? def.range[b.level - 1] : TURRET.range;
           let every = def.fireEvery ? def.fireEvery[b.level - 1] : TURRET.fireEvery;
-          if (this.passive(b.owner, 'starcharts')) { range *= 1.25; every *= 0.75; }
+          if (!stray && this.passive(b.owner, 'starcharts')) { range *= 1.25; every *= 0.75; }
           const hacked = this.fx(b, 'hack');
           const shooterOwner = hacked ? b.hackBy : b.owner;
           let best = null, bd = range;

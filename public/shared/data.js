@@ -37,7 +37,7 @@ export const BUILDINGS = {
   },
   tower: {
     name: 'Scratch Tower', icon: '🗼', maxLevel: 3,
-    desc: 'Flings hairballs at enemy cats walking past. Each upgrade reaches much farther. Tough to capture.',
+    desc: 'Flings hairballs at enemy cats walking past. An unowned tower flings them at everyone until someone takes it. Each upgrade reaches much farther. Tough to capture.',
     cap: [20, 30, 40], prod: [0, 0, 0], range: [175, 255, 340], fireEvery: [1.25, 0.95, 0.7], dmg: 1,
     upgradeCost: [15, 25], defense: 1.5, radius: [36, 38, 40],
   },

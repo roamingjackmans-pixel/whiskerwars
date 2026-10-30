@@ -98,14 +98,14 @@ export class AI {
     }
   }
 
-  /** Roughly how many cats enemy towers will knock out of a squad walking this route. */
+  /** Roughly how many cats enemy towers (and unowned towers, which shoot everyone) will knock out of a squad walking this route. */
   towerLoss(from, to) {
     const g = this.g;
     const route = g.nav.fullPath(from.id, to.id);
     let shots = 0;
     for (const t of g.buildings) {
       const def = BUILDINGS[t.type];
-      if (!def.range || t.owner < 0 || t.owner === this.i || t.count < 1 || t === to) continue;
+      if (!def.range || (t.owner < 0 && t.type !== 'tower') || t.owner === this.i || t.count < 1 || t === to) continue;
       const range = def.range[t.level - 1];
       let inRange = 0;
       for (let k = 1; k < route.length; k++) inRange += chordIn(t, range, route[k - 1], route[k]);
@@ -115,7 +115,12 @@ export class AI {
   }
 
   value(tg) {
-    const base = tg.type === 'cottage' ? 2 + tg.level * 0.8 : tg.type === 'cattree' ? 8 : tg.type === 'tower' ? 3 : 3.1;
+    let base = tg.type === 'cottage' ? 2 + tg.level * 0.8 : tg.type === 'cattree' ? 8 : tg.type === 'tower' ? 3 : 3.1;
+    if (tg.type === 'tower' && tg.owner < 0) {
+      // an unowned tower shoots everyone: one sitting on my doorstep is worth clearing early
+      const r = BUILDINGS.tower.range[tg.level - 1] + 120;
+      for (const b of this.g.buildings) if (b.owner === this.i && Math.hypot(b.x - tg.x, b.y - tg.y) < r) base += 2;
+    }
     return base * (tg.owner >= 0 ? 1.3 : 1);
   }
 
