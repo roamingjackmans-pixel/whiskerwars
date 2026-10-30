@@ -1,0 +1,857 @@
+// Whisker Wars menus & screens.
+import {
+  HEROES, HERO_BY_ID, CLANS, FURS, HATS, MAPS, MAP_BY_ID, THEMES, AI_LEVELS, CAMPAIGN, ACHIEVEMENTS, BUILDINGS, EMOTES,
+  randomMap, teamColor, RULES,
+} from '../shared/data.js';
+import * as P from './profile.js';
+import { audio } from './audio.js';
+import { Match } from './match.js';
+import { OnlineSession } from './online.js';
+import { detectServer, cleanCode } from './net.js';
+import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
+
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const safe = (fn, ...a) => { try { return fn(...a); } catch (e) { console.warn(e); return ''; } };
+const portrait = (id, s = 128) => safe(heroPortraitURL, id, s);
+const catImg = (fur, hat, s = 96, o = 0) => safe(catPreviewURL, fur, hat, s, o);
+const bImg = (t, l, o, s = 96) => safe(buildingPreviewURL, t, l, o, s);
+
+let canvas, screens, hudRoot, modalRoot, toastRoot;
+let attract = null, match = null, session = null;
+let current = null;
+const state = { practice: { map: 'meadow', ai: 'normal', enemy: 'random', rules: {} }, lastCampaign: null };
+
+function rulesRow(rules, readonly) {
+  return `<div class="rules-row"><div class="rules-l">Fun modifiers${readonly ? ' <span class="muted small">(host picks)</span>' : ''}:</div>${RULES.map(r => `<button class="btn small rule-btn ${rules[r.id] ? 'on' : ''}" data-rule="${r.id}" title="${r.desc}" ${readonly ? 'disabled' : ''}>${r.icon} ${r.name}</button>`).join('')}</div>`;
+}
+
+// debug handle for testing in the browser console
+window.__WW = { get match() { return match; }, get session() { return session; }, get attract() { return attract; }, go };
+
+export function initUI() {
+  canvas = $('#game'); screens = $('#screens'); hudRoot = $('#hud'); modalRoot = $('#modal'); toastRoot = $('#toasts');
+  document.addEventListener('pointerdown', () => audio.init(), { capture: true });
+  document.addEventListener('click', ev => {
+    const b = ev.target.closest('button, .clickable');
+    if (b && !b.classList.contains('silent')) audio.play(b.classList.contains('back') ? 'back' : 'click', { vol: 0.6 });
+  }, { capture: true });
+  document.addEventListener('pointerover', ev => { const b = ev.target.closest('.btn, .card.clickable'); if (b && !b._hov) { b._hov = 1; audio.play('hover', { vol: 0.25 }); b.addEventListener('pointerleave', () => (b._hov = 0), { once: true }); } });
+  P.onChange(() => refreshTopbar());
+  const st = P.profile().settings;
+  audio.setVolumes({ sfx: st.sfx, music: st.music });
+  audio.setMuted(!!st.muted);
+}
+
+// ---------------------------------------------------------------- attract-mode background battle
+function startAttract() {
+  if (attract || match) return;
+  const heroes = HEROES.map(h => h.id);
+  const pick = () => heroes[Math.floor(Math.random() * heroes.length)];
+  const map = Math.random() < 0.5 ? randomMap((Math.random() * 1e6) | 0) : structuredClone(MAPS[Math.floor(Math.random() * MAPS.length)]);
+  const furs = FURS.map(f => f.id), hats = HATS.map(h => h.id);
+  const r = a => a[Math.floor(Math.random() * a.length)];
+  attract = new Match(canvas, hudRoot, {
+    mode: 'attract', role: 'local', me: -1, fxLevel: 'medium',
+    cfg: { map, seed: (Math.random() * 1e9) | 0, timeLimit: 400, players: [{ name: 'A', hero: pick(), fur: r(furs), hat: r(hats), ai: 'normal' }, { name: 'B', hero: pick(), fur: r(furs), hat: r(hats), ai: 'normal' }] },
+    onEnd: () => { stopAttract(); if (!match) startAttract(); },
+  });
+  attract.start(0);
+  canvas.classList.add('attract');
+}
+function stopAttract() { if (attract) { attract.stop(); attract = null; } canvas.classList.remove('attract'); }
+
+// ---------------------------------------------------------------- navigation
+export function go(name, params = {}) {
+  if (current && current.leave) current.leave(name);
+  modalRoot.innerHTML = '';
+  const S = SCREENS[name];
+  current = { name, leave: null };
+  screens.className = 'screens show screen-' + name;
+  screens.innerHTML = '';
+  if (name !== 'results') startAttract();
+  const res = S(params);
+  screens.scrollTop = 0;
+  if (res && res.leave) current.leave = res.leave;
+  if (name === 'home' || name === 'friend') audio.music('menu');
+  refreshTopbar();
+}
+
+function topbar(back = true, title = '') {
+  const p = P.profile();
+  return `<div class="topbar">
+    ${back ? `<button class="btn small back" data-go="home">← Back</button>` : `<div class="logo-small">🐾 Whisker Wars</div>`}
+    ${title ? `<h1 class="screen-title">${title}</h1>` : '<div></div>'}
+    <div class="wallet">
+      <span class="pill lvl" title="Player level">⭐ Lv <b class="tb-lv">${p.level}</b></span>
+      <span class="pill coins" title="Fish coins: earned by playing"><span class="fish">🐟</span> <b class="tb-coins">${p.coins}</b></span>
+    </div>
+  </div>`;
+}
+function refreshTopbar() {
+  const p = P.profile();
+  $$('.tb-coins').forEach(e => { if (+e.textContent !== p.coins) { e.textContent = p.coins; e.parentElement.classList.remove('bump'); void e.offsetWidth; e.parentElement.classList.add('bump'); } });
+  $$('.tb-lv').forEach(e => e.textContent = p.level);
+}
+function wireGo(root = screens) {
+  $$('[data-go]', root).forEach(b => b.addEventListener('click', () => go(b.dataset.go)));
+}
+
+export function toast(html, kind = '') {
+  const t = document.createElement('div');
+  t.className = 'mtoast ' + kind;
+  t.innerHTML = html;
+  toastRoot.appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 500); }, 3200);
+}
+function modal(html, opts = {}) {
+  modalRoot.innerHTML = `<div class="modal-bg"><div class="modal ${opts.cls || ''}">${opts.close !== false ? '<button class="modal-x back">✕</button>' : ''}${html}</div></div>`;
+  const bg = $('.modal-bg', modalRoot);
+  const close = () => { modalRoot.innerHTML = ''; opts.onClose && opts.onClose(); };
+  const x = $('.modal-x', modalRoot); if (x) x.onclick = close;
+  if (opts.close !== false) bg.addEventListener('click', ev => { if (ev.target === bg) close(); });
+  return { el: $('.modal', modalRoot), close };
+}
+
+// ---------------------------------------------------------------- shared widgets
+function heroCard(h, { selected, locked, small } = {}) {
+  const c = CLANS[h.clan];
+  return `<div class="hero-card card clickable ${selected ? 'sel' : ''} ${locked ? 'locked' : ''} ${small ? 'small' : ''}" data-hero="${h.id}" style="--clan:${c.color}">
+    <img src="${portrait(h.id, small ? 96 : 140)}" alt="">
+    <div class="hc-name">${h.name}</div>
+    ${small ? '' : `<div class="hc-title">${h.title}</div>`}
+    ${locked ? `<div class="hc-lock">🔒 <span class="fish">🐟</span>${h.cost}</div>` : ''}
+  </div>`;
+}
+function heroDetail(h) {
+  const c = CLANS[h.clan];
+  const tl = { own: 'your building', enemy: 'enemy building', neutral: 'stray building', notown: 'enemy/stray building', area: 'area', global: 'instant' };
+  return `<div class="hero-detail" style="--clan:${c.color}">
+    <div class="hd-top">
+      <img class="hd-portrait" src="${portrait(h.id, 200)}" alt="">
+      <div>
+        <div class="hd-clan">${c.icon} ${c.name}</div>
+        <h2>${h.name}</h2><div class="hd-title">${h.title}</div>
+        <p class="hd-blurb">${h.blurb}</p>
+      </div>
+    </div>
+    <div class="ability passive"><div class="ab-icon">✦</div><div><b>${h.passive.name}</b> <span class="ab-tag">passive</span><div>${h.passive.desc}</div></div></div>
+    ${h.spells.map((s, k) => `<div class="ability"><div class="ab-icon">${s.icon}</div><div><b>${s.name}</b> <span class="ab-tag">${k + 1}</span>
+      <div>${s.desc}</div><div class="ab-meta">🌿 ${s.cost} catnip · ⏱ ${s.cd}s · 🎯 ${tl[s.target]}</div></div></div>`).join('')}
+  </div>`;
+}
+/** Inline hero picker (unlocked heroes selectable; locked shown). */
+function heroPicker(root, selected, onPick) {
+  const draw = () => {
+    root.innerHTML = `<div class="hero-strip">${HEROES.map(h => heroCard(h, { selected: h.id === selected, locked: !P.heroUnlocked(h.id), small: true })).join('')}</div>`;
+    $$('.hero-card', root).forEach(el => el.addEventListener('click', () => {
+      const id = el.dataset.hero;
+      if (!P.heroUnlocked(id)) { showHero(id, () => { draw(); }); return; }
+      selected = id; draw(); onPick(id);
+      audio.play('meow', { vol: 0.5, pitch: 1 + Math.random() * 0.2 });
+    }));
+  };
+  draw();
+}
+function showHero(id, after) {
+  const h = HERO_BY_ID[id];
+  const owned = P.heroUnlocked(id);
+  const p = P.profile();
+  const m = modal(`${heroDetail(h)}
+    <div class="modal-actions">
+      ${owned ? `<button class="btn primary act-equip">${p.equip.hero === id ? '✔ Your main hero' : 'Make main hero'}</button>`
+      : `<button class="btn primary act-buy ${p.coins >= h.cost ? '' : 'off'}">Unlock for <span class="fish">🐟</span> ${h.cost}</button>`}
+    </div>`, { cls: 'wide' });
+  const buy = $('.act-buy', m.el);
+  if (buy) buy.onclick = () => {
+    const r = P.buy('hero', id);
+    if (!r.ok) { audio.play('error'); toast(r.msg, 'warn'); return; }
+    audio.play('unlock'); toast(`🎉 <b>${h.name}</b> joined your clowder!`, 'good');
+    for (const a of r.newAch || []) toast(`🏆 Achievement: <b>${a.name}</b> +${a.reward} 🐟`, 'good');
+    P.equip('hero', id);
+    m.close(); after && after();
+  };
+  const eq = $('.act-equip', m.el);
+  if (eq) eq.onclick = () => { P.equip('hero', id); m.close(); after && after(); };
+}
+function mapPreview(m) {
+  const th = THEMES[m.theme] || THEMES.meadow;
+  const dots = (m.buildings || []).map(b => {
+    const c = b.owner >= 0 ? teamColor(b.owner).main : '#efe8dc';
+    const r = b.type === 'cattree' ? 7 : 4.5;
+    return `<circle cx="${b.x / 10}" cy="${b.y / 10}" r="${r}" fill="${c}" stroke="rgba(0,0,0,.35)" stroke-width="1"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 160 90" class="map-svg"><rect width="160" height="90" rx="8" fill="${th.ground}"/><rect x="4" y="4" width="152" height="82" rx="6" fill="${th.ground2}" opacity=".5"/>${dots}</svg>`;
+}
+function mapPicker(root, selected, onPick, opts = {}) {
+  const maps = [...MAPS, { id: 'random', name: 'Random Map', theme: 'meadow', size: '???', desc: 'A brand new battlefield every time.', buildings: [] }];
+  const draw = () => {
+    root.innerHTML = `<div class="map-grid">${maps.map(m => `<div class="map-card card ${opts.readonly ? '' : 'clickable'} ${m.id === selected ? 'sel' : ''}" data-map="${m.id}">
+      ${m.id === 'random' ? '<div class="map-svg rnd">🎲</div>' : mapPreview(m)}
+      <div class="mc-name">${m.name}</div><div class="mc-size">${m.size}${m.theme && m.id !== 'random' ? ' · ' + THEMES[m.theme].name : ''}</div></div>`).join('')}</div>`;
+    if (!opts.readonly) $$('.map-card', root).forEach(el => el.addEventListener('click', () => { selected = el.dataset.map; draw(); onPick(selected); }));
+  };
+  draw();
+}
+function resolveMap(id, seed) {
+  return id === 'random' ? randomMap(seed >>> 0) : structuredClone(MAP_BY_ID[id] || MAPS[0]);
+}
+
+// ---------------------------------------------------------------- SCREENS
+const SCREENS = {};
+
+SCREENS.home = () => {
+  const p = P.profile();
+  const eq = HERO_BY_ID[p.equip.hero] || HEROES[0];
+  screens.innerHTML = `${topbar(false)}
+    <div class="home">
+      <div class="logo">
+        <div class="logo-ears"><span></span><span></span></div>
+        <div class="logo-text"><span class="w1">Whisker</span><span class="w2">Wars</span></div>
+        <div class="logo-sub">Real-time cat kingdom battles</div>
+      </div>
+      <div class="home-main">
+        <button class="btn huge primary pulse" data-go="friend">⚔️ Battle a Friend<small>Real-time online PvP · share a room code</small></button>
+        <div class="home-grid">
+          <button class="btn tile" data-go="campaign"><span class="ti">🗺️</span>Campaign<small>${Object.keys(p.campaign).length}/${CAMPAIGN.length} cleared</small></button>
+          <button class="btn tile" data-go="practice"><span class="ti">🤖</span>Practice<small>vs computer cats</small></button>
+          <button class="btn tile" data-go="heroes"><span class="ti">😺</span>Heroes<small>${p.heroes.length}/${HEROES.length} unlocked</small></button>
+          <button class="btn tile" data-go="shop"><span class="ti">🛍️</span>Cat Shop<small>furs & hats</small></button>
+          <button class="btn tile" data-go="profile"><span class="ti">🏆</span>Profile<small>stats & trophies</small></button>
+          <button class="btn tile" data-go="howto"><span class="ti">📖</span>How to Play<small>learn in 1 minute</small></button>
+        </div>
+      </div>
+      <div class="home-me card clickable" data-go="profile">
+        <img src="${catImg(p.equip.fur, p.equip.hat, 96, 0)}" alt="">
+        <div><div class="hm-name">${esc(p.name)}</div><div class="hm-sub">Main hero: ${eq.name}</div></div>
+      </div>
+      <button class="btn icon settings-btn" data-go="settings" title="Settings">⚙️</button>
+    </div>`;
+  wireGo();
+  if (!p.seenTutorial) setTimeout(() => welcome(), 400);
+  else if (P.dailyAvailable()) setTimeout(() => dailyGift(), 500);
+};
+
+function welcome() {
+  const p = P.profile();
+  const m = modal(`<div class="welcome">
+    <img class="welcome-cat" src="${catImg('ginger', 'crown', 160, 0)}" alt="">
+    <h2>Welcome to Whisker Wars!</h2>
+    <p>Lead an army of adorable cats, capture cottages, cast silly spells and conquer your friends.</p>
+    <label>What should we call you, commander?</label>
+    <div class="row"><input class="name-in" maxlength="16" value="${esc(p.name)}"><button class="btn small dice silent" title="Random name">🎲</button></div>
+    <button class="btn primary big go-tut">Let's go! 🐾</button>
+    <p class="muted small">Tip: open <b>How to Play</b> for a 1-minute guide.</p>
+  </div>`, { close: false });
+  const names = ['Mochi', 'Noodle', 'Biscuit', 'Pickles', 'Tofu', 'Meowzart', 'Purrlock', 'Socks', 'Butterbean', 'Clawdia', 'Catniss', 'Sushi', 'Waffles', 'Pudding'];
+  $('.dice', m.el).onclick = () => { $('.name-in', m.el).value = names[Math.floor(Math.random() * names.length)] + Math.floor(Math.random() * 90 + 10); audio.play('mew'); };
+  $('.go-tut', m.el).onclick = () => {
+    P.setName($('.name-in', m.el).value);
+    P.profile().seenTutorial = true; P.save();
+    m.close();
+    audio.play('meow');
+    go('home'); // home shows the daily gift
+  };
+}
+function dailyGift() {
+  const m = modal(`<div class="daily"><div class="gift">🎁</div><h2>Daily Gift!</h2><p>The Cat Council sends you a basket of fish.</p>
+    <button class="btn primary big claim">Claim <span class="fish">🐟</span> 50</button></div>`, { close: false });
+  $('.claim', m.el).onclick = () => { const n = P.claimDaily(); audio.play('coins'); toast(`+${n} 🐟 fish coins!`, 'good'); m.close(); };
+}
+
+// ---------- Friend (create / join)
+SCREENS.friend = (params = {}) => {
+  screens.innerHTML = `${topbar(true, 'Battle a Friend')}
+    <div class="friend">
+      <div class="card panel">
+        <div class="big-emoji">🏠</div>
+        <h2>Create a room</h2>
+        <p>Get a 5-letter code (and a link) to send to your friend.</p>
+        <button class="btn primary big create">Create Room</button>
+      </div>
+      <div class="card panel">
+        <div class="big-emoji">🔑</div>
+        <h2>Join a room</h2>
+        <p>Type the code your friend sent you.</p>
+        <input class="code-in" maxlength="6" placeholder="ABCDE" autocomplete="off" spellcheck="false" value="${esc(params.code || '')}">
+        <button class="btn primary big join">Join Room</button>
+      </div>
+    </div>
+    <div class="net-mode muted small center"></div>`;
+  wireGo();
+  detectServer().then(u => { const el = $('.net-mode'); if (el) el.innerHTML = u ? '🟢 Connected via the Whisker Wars server' : '🟢 Direct peer-to-peer mode (no server needed)'; });
+  const createBtn = $('.create'), joinBtn = $('.join'), input = $('.code-in');
+  input.addEventListener('input', () => { input.value = cleanCode(input.value); });
+  input.addEventListener('keydown', ev => { if (ev.key === 'Enter') joinBtn.click(); });
+  createBtn.onclick = async () => {
+    createBtn.disabled = true; createBtn.textContent = 'Creating...';
+    try { endSession(); session = await OnlineSession.host(); go('lobby'); }
+    catch (e) { console.error(e); toast('😿 Could not create a room: ' + esc(e.message || e), 'warn'); createBtn.disabled = false; createBtn.textContent = 'Create Room'; }
+  };
+  joinBtn.onclick = async () => {
+    const code = cleanCode(input.value);
+    if (code.length < 5) { toast('Room codes have 5 letters/numbers', 'warn'); audio.play('error'); return; }
+    joinBtn.disabled = true; joinBtn.textContent = 'Joining...';
+    try { endSession(); session = await OnlineSession.join(code); go('lobby'); }
+    catch (e) {
+      console.error(e);
+      toast(e.code === 'notfound' ? `😿 No room called <b>${code}</b>. Check the code with your friend.` : '😿 ' + esc(e.message || 'Could not join'), 'warn');
+      joinBtn.disabled = false; joinBtn.textContent = 'Join Room';
+    }
+  };
+  if (params.code && params.auto) setTimeout(() => joinBtn.click(), 300);
+};
+
+function endSession() { if (session) { session.close(); session = null; } }
+
+// ---------- Lobby
+SCREENS.lobby = () => {
+  if (!session) return go('friend');
+  const S = session;
+  const p = P.profile();
+  if (!P.heroUnlocked(p.equip.hero)) P.equip('hero', 'whiskers');
+  S.setPick({ hero: p.equip.hero, fur: p.equip.fur, hat: p.equip.hat, name: p.name, level: p.level });
+  const link = `${location.origin}${location.pathname}?room=${S.code}`;
+  screens.innerHTML = `${topbar(false, 'Battle Lobby')}
+    <div class="lobby">
+      <div class="room card">
+        <div class="room-l">ROOM CODE</div>
+        <div class="room-code">${S.code.split('').map(c => `<span>${c}</span>`).join('')}</div>
+        <div class="row center">
+          <button class="btn small copy-code">📋 Copy code</button>
+          <button class="btn small copy-link">🔗 Copy invite link</button>
+          ${navigator.share ? '<button class="btn small share">📤 Share</button>' : ''}
+        </div>
+        <div class="room-mode muted small">${S.kind === 'server' ? 'via game server' : 'peer-to-peer'}</div>
+      </div>
+      <div class="vs-row">
+        <div class="pslot me-slot"></div>
+        <div class="vs">VS</div>
+        <div class="pslot opp-slot"></div>
+      </div>
+      <div class="lobby-cols">
+        <div class="card panel"><h3>Choose your hero</h3><div class="lobby-heroes"></div><div class="lobby-hero-detail"></div></div>
+        <div class="card panel"><h3>Battlefield ${S.isHost ? '' : '<span class="muted small">(host picks)</span>'}</h3><div class="lobby-maps"></div>
+          <div class="time-row">Time limit: ${[300, 480, 600, 900].map(t => `<button class="btn small time-btn" data-t="${t}" ${S.isHost ? '' : 'disabled'}>${t / 60} min</button>`).join('')}</div>
+          <div class="lobby-rules"></div>
+          <div class="lobby-emotes">${EMOTES.map(e => `<button class="btn small lem" data-e="${e.id}" title="${e.text}">${e.icon}</button>`).join('')}</div>
+        </div>
+      </div>
+      <div class="lobby-bar">
+        <button class="btn back leave">🚪 Leave</button>
+        <div class="lobby-status"></div>
+        <button class="btn primary big ready-btn"></button>
+      </div>
+    </div>`;
+  const copy = (txt, what) => { navigator.clipboard?.writeText(txt).then(() => toast(`📋 ${what} copied!`, 'good'), () => toast(txt)); };
+  $('.copy-code').onclick = () => copy(S.code, 'Code');
+  $('.copy-link').onclick = () => copy(link, 'Invite link');
+  const sh = $('.share'); if (sh) sh.onclick = () => navigator.share({ title: 'Whisker Wars', text: `Battle me in Whisker Wars! Room code: ${S.code}`, url: link }).catch(() => { });
+  $('.leave').onclick = () => { endSession(); go('home'); };
+  let myHero = p.equip.hero;
+  const drawDetail = () => { $('.lobby-hero-detail').innerHTML = heroDetail(HERO_BY_ID[myHero]); };
+  heroPicker($('.lobby-heroes'), myHero, id => { myHero = id; P.equip('hero', id); S.setPick({ hero: id }); if (S.lobby.ready[S.me]) S.setReady(false); drawDetail(); });
+  drawDetail();
+  let lastMap = null;
+  const drawMaps = () => mapPicker($('.lobby-maps'), S.lobby.map, id => S.setMap(id), { readonly: !S.isHost });
+  $$('.time-btn').forEach(b => b.onclick = () => S.setTime(+b.dataset.t));
+  $$('.lem').forEach(b => b.onclick = () => { S.lobbyEmote(b.dataset.e); showLobbyEmote(S.me, b.dataset.e); audio.play('emote'); });
+
+  const slot = (pl, i, ready) => {
+    if (!pl) return `<div class="pcard-l empty"><div class="waiting-cat">🐾</div><div>Waiting for a friend...</div><div class="muted small">Send them the code <b>${S.code}</b></div></div>`;
+    const h = HERO_BY_ID[pl.hero] || HEROES[0];
+    return `<div class="pcard-l" style="--tc:${teamColor(i).main}">
+      <img class="pl-hero" src="${portrait(h.id, 120)}" alt="">
+      <div class="pl-info"><div class="pl-name">${esc(pl.name)} <span class="pill tiny">Lv ${pl.level}</span></div><div class="pl-hero-n">${h.name}</div>
+      <div class="pl-cat"><img src="${catImg(pl.fur, pl.hat, 64, i)}" alt=""></div></div>
+      <div class="pl-ready ${ready ? 'on' : ''}">${ready ? '✔ READY' : i === 0 && S.isHost ? 'HOST' : 'not ready'}</div>
+      <div class="lemote-pop"></div>
+    </div>`;
+  };
+  const showLobbyEmote = (i, id) => {
+    const el = $(i === S.me ? '.me-slot .lemote-pop' : '.opp-slot .lemote-pop');
+    const em = EMOTES.find(x => x.id === id);
+    if (el && em) { el.textContent = `${em.icon} ${em.text}`; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); }
+  };
+  const render = () => {
+    const L = S.lobby;
+    const me = S.me, op = 1 - me;
+    $('.me-slot').innerHTML = slot(L.players[me], me, L.ready[me]);
+    $('.opp-slot').innerHTML = slot(L.players[op], op, L.ready[op]);
+    if (L.map !== lastMap) { lastMap = L.map; drawMaps(); }
+    $$('.time-btn').forEach(b => b.classList.toggle('on', +b.dataset.t === L.time));
+    $('.lobby-rules').innerHTML = rulesRow(L.rules || {}, !S.isHost);
+    if (S.isHost) $$('.rule-btn').forEach(b => b.onclick = () => S.toggleRule(b.dataset.rule));
+    const rb = $('.ready-btn'), st = $('.lobby-status');
+    const oppHere = !!L.players[op];
+    if (S.isHost) {
+      rb.textContent = '⚔️ Start Battle!';
+      rb.classList.toggle('off', !S.canStart());
+      st.innerHTML = !oppHere ? 'Waiting for your friend to join...' : L.ready[1] ? '<b>Your friend is ready!</b> Start when you are.' : 'Waiting for your friend to press Ready...';
+    } else {
+      rb.textContent = L.ready[me] ? '✔ Ready! (tap to cancel)' : '👍 I\'m Ready!';
+      rb.classList.toggle('on', !!L.ready[me]);
+      st.innerHTML = L.ready[me] ? 'Waiting for the host to start...' : 'Pick your hero, then press Ready.';
+    }
+  };
+  $('.ready-btn').onclick = () => {
+    if (S.isHost) {
+      if (!S.canStart()) { audio.play('error'); toast(S.lobby.players[1] ? 'Your friend is not ready yet' : 'No friend in the room yet — send them the code!', 'warn'); return; }
+      startOnline();
+    } else S.setReady(!S.lobby.ready[S.me]);
+  };
+  const offs = [
+    S.on('lobby', render),
+    S.on('guest-hello', pl => { toast(`😺 <b>${esc(pl.name)}</b> joined the room!`, 'good'); audio.play('meow'); }),
+    S.on('peer-leave', () => { toast('😿 Your friend left the room', 'warn'); }),
+    S.on('lemote', (id, from) => { showLobbyEmote(from, id); audio.play('emote'); }),
+    S.on('start', m => startGuest(m)),
+    S.on('disconnected', () => { toast('😿 Lost connection to the room', 'warn'); endSession(); go('friend'); }),
+    S.on('error', e => toast('😿 ' + esc(e.message), 'warn')),
+  ];
+  render();
+  return { leave: () => offs.forEach(f => f()) };
+};
+
+function startOnline() {
+  const S = session;
+  const L = S.lobby;
+  const cfg = {
+    map: resolveMap(L.map, L.seed), seed: L.seed, timeLimit: L.time, rules: L.rules || {},
+    players: L.players.map(pl => ({ name: pl.name, hero: pl.hero, fur: pl.fur, hat: pl.hat })),
+  };
+  S.markMatch();
+  const m = beginMatch({
+    mode: 'online', role: 'host', me: 0, cfg,
+    send: msg => S.send(msg), getPing: () => S.ping,
+  });
+  const first = m.interp.latest;
+  S.send({ type: 'start', info: m.info, snap: { t: first.t, b: first.b, s: first.s, p: first.p, e: [] } });
+  wireSessionToMatch(m);
+}
+function startGuest(msg) {
+  const S = session;
+  const m = beginMatch({ mode: 'online', role: 'guest', me: 1, info: msg.info, firstSnap: msg.snap, send: x => S.send(x), getPing: () => S.ping });
+  wireSessionToMatch(m);
+}
+function wireSessionToMatch(m) {
+  const S = session;
+  S.inMatch = true;
+  const GRACE = 20;
+  let timer = null, left = 0;
+  const offs = [S.on('snap', s => m.pushRemoteSnap(s))];
+  if (S.isHost) {
+    // host: pause and wait for the guest to come back
+    const lost = () => {
+      if (m.over || timer) return;
+      m.netPause(true);
+      left = GRACE;
+      const tick = () => {
+        if (m.over) return;
+        m.hud && m.hud.waiting('Your opponent lost connection...<br>Waiting <b>' + left + 's</b> for them to come back');
+        if (left-- <= 0) { timer = null; m.hud && m.hud.waiting(null); m.netPause(false); m.forceEnd(S.me, 'disconnect'); return; }
+        timer = setTimeout(tick, 1000);
+      };
+      tick();
+    };
+    offs.push(
+      S.on('cmd', c => m.remoteCommand(c, 1)),
+      S.on('peer-leave', lost),
+      S.on('guest-resume', () => {
+        if (m.over) return;
+        clearTimeout(timer); timer = null;
+        S.send({ type: 'start', info: m.info, snap: m.currentSnap(), resume: true });
+        m.hud && m.hud.waiting('Opponent is back! Resuming...');
+        setTimeout(() => { m.hud && m.hud.waiting(null); m.netPause(false); }, 1500);
+        toast('😺 Your opponent reconnected!', 'good');
+      }),
+      S.on('disconnected', () => { if (!m.over) m.forceEnd(-1, 'disconnect'); }),
+    );
+  } else {
+    // guest: try to get back into the room
+    let trying = false;
+    const lost = async () => {
+      if (m.over || trying) return;
+      trying = true;
+      const t0 = Date.now();
+      while (!m.over && Date.now() - t0 < GRACE * 1000) {
+        m.hud && m.hud.waiting('Connection lost... reconnecting (' + Math.max(0, GRACE - Math.round((Date.now() - t0) / 1000)) + 's)');
+        try { await S.rejoin(); m.hud && m.hud.waiting('Reconnected! Waiting for the host...'); return; }
+        catch (e) { await new Promise(r => setTimeout(r, 1500)); }
+      }
+      trying = false;
+      m.hud && m.hud.waiting(null);
+      if (!m.over) m.forceEnd(-1, 'disconnect');
+    };
+    offs.push(
+      S.on('peer-leave', lost),
+      S.on('disconnected', lost),
+      S.on('resume', msg => {
+        if (m.over) return;
+        trying = false;
+        m.hud && m.hud.waiting(null);
+        const nm = beginMatch({ ...m.opts, info: msg.info, firstSnap: msg.snap, countdown: 0 });
+        wireSessionToMatch(nm);
+      }),
+    );
+  }
+  m._offs = offs;
+}
+
+// ---------- start any match
+function beginMatch(opts) {
+  stopAttract();
+  if (match) { if (match._offs) match._offs.forEach(f => f()); match.stop(); match = null; }
+  screens.className = 'screens';
+  screens.innerHTML = '';
+  modalRoot.innerHTML = '';
+  if (current && current.leave) { current.leave('match'); current.leave = null; }
+  current = { name: 'match' };
+  const st = P.profile().settings;
+  const m = new Match(canvas, hudRoot, {
+    ...opts, fxLevel: st.fx,
+    onEnd: res => onMatchEnd(m, opts, res),
+  });
+  match = m;
+  m.start(opts.countdown ?? 3);
+  return m;
+}
+
+function onMatchEnd(m, opts, res) {
+  if (m._offs) m._offs.forEach(f => f());
+  if (session) session.inMatch = false;
+  m.stop();
+  if (match === m) match = null;
+  const me = res.me;
+  const st = res.stats ? res.stats[me] : {};
+  const info = res.info;
+  const opp = info.players[1 - me];
+  const reward = P.recordMatch({
+    mode: opts.mode, win: res.win, draw: res.draw, why: res.why, ai: opts.aiLevel, stats: st || {}, time: res.time,
+    opponent: opp.name, hero: info.players[me].hero, map: info.map.name, level: opts.level,
+  });
+  go('results', { res, opts, reward });
+}
+
+// ---------- Results
+SCREENS.results = ({ res, opts, reward }) => {
+  const info = res.info, me = res.me, opp = 1 - me;
+  const mine = info.players[me], theirs = info.players[opp];
+  const S = res.stats || [];
+  const row = (label, key) => `<tr><td>${label}</td><td>${S[me] ? S[me][key] : '-'}</td><td>${S[opp] ? S[opp][key] : '-'}</td></tr>`;
+  const p = P.profile();
+  const nh = reward.nextHero;
+  const isCampaign = opts.mode === 'campaign';
+  const nextLevel = isCampaign ? CAMPAIGN.find(l => l.id === opts.level.id + 1) : null;
+  screens.innerHTML = `<div class="results ${res.win ? 'win' : res.draw ? 'draw' : 'lose'}">
+    <div class="res-banner">${res.win ? '🏆 VICTORY!' : res.draw ? '🤝 DRAW' : '😿 DEFEAT'}</div>
+    <div class="res-sub">${res.why === 'surrender' ? (res.win ? 'Your opponent surrendered' : 'You surrendered') : res.why === 'disconnect' ? 'Opponent disconnected' : res.why === 'time' ? 'Time ran out: the biggest army wins' : res.win ? 'You conquered every building!' : 'Your clowder has been scattered...'}
+      · ${Math.floor(res.time / 60)}:${String(res.time % 60).padStart(2, '0')}</div>
+    ${isCampaign && res.win ? `<div class="res-stars">${[1, 2, 3].map(k => `<span class="${k <= reward.stars ? 'on' : ''}">★</span>`).join('')}</div>` : ''}
+    <div class="res-vs">
+      <div class="res-p"><img src="${portrait(mine.hero, 140)}"><div>${esc(mine.name)}</div></div>
+      <div class="vs">VS</div>
+      <div class="res-p"><img src="${portrait(theirs.hero, 140)}"><div>${esc(theirs.name)}</div></div>
+    </div>
+    <div class="res-cols">
+      <div class="card panel">
+        <h3>Battle stats</h3>
+        <table class="stats"><tr><th></th><th>You</th><th>Them</th></tr>
+          ${row('🐱 Kittens made', 'produced')}${row('🏠 Buildings captured', 'captured')}${row('💥 Cats knocked out', 'killed')}
+          ${row('✨ Spells cast', 'spells')}${row('📈 Biggest army', 'peakArmy')}${row('⬆ Upgrades', 'upgrades')}
+        </table>
+      </div>
+      <div class="card panel rewards">
+        <h3>Rewards</h3>
+        <div class="rw-lines">${reward.lines.map(([l, c], k) => `<div class="rw-line" style="animation-delay:${0.2 + k * 0.25}s"><span>${l}</span><b>+${c} 🐟</b></div>`).join('')}</div>
+        <div class="rw-total">Total <b class="rw-count">0</b> <span class="fish">🐟</span></div>
+        <div class="xpbar"><div style="width:${Math.round(p.xp / P.xpForLevel(p.level) * 100)}%"></div><span>Lv ${p.level} · ${p.xp}/${P.xpForLevel(p.level)} XP</span></div>
+        ${nh ? `<div class="next-hero"><img src="${portrait(nh.id, 64)}"><div><b>Next unlock: ${nh.name}</b><div class="progress"><div style="width:${Math.min(100, Math.round(p.coins / nh.cost * 100))}%"></div></div>
+          <div class="small">${p.coins >= nh.cost ? '✨ You can unlock this hero now!' : `${nh.cost - p.coins} more fish coins`}</div></div></div>` : '<div class="next-hero">🎉 You have unlocked every hero!</div>'}
+      </div>
+    </div>
+    <div class="res-actions">
+      ${opts.mode === 'online' ? `<button class="btn primary big rematch">🔁 Rematch</button><button class="btn big back leave">🚪 Leave room</button>` : ''}
+      ${opts.mode === 'practice' ? `<button class="btn primary big again">🔁 Play again</button><button class="btn big" data-go="practice">⚙️ Change setup</button>` : ''}
+      ${isCampaign ? `${res.win && nextLevel ? `<button class="btn primary big next">▶ Next: ${nextLevel.name}</button>` : `<button class="btn primary big again">🔁 ${res.win ? 'Replay' : 'Try again'}</button>`}<button class="btn big" data-go="campaign">🗺️ Campaign</button>` : ''}
+      <button class="btn big" data-go="home">🏠 Menu</button>
+      ${nh && p.coins >= nh.cost ? `<button class="btn big gold" data-go="heroes">😺 Unlock heroes</button>` : ''}
+    </div>
+  </div>`;
+  wireGo();
+  // count-up
+  const el = $('.rw-count');
+  const t0 = performance.now(), dur = 1200 + reward.lines.length * 200;
+  const step = now => { const u = Math.min(1, (now - t0) / dur); el.textContent = Math.round(reward.total * u); if (u < 1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+  setTimeout(() => audio.play('coins'), 400);
+  for (const lu of reward.levelUps) setTimeout(() => { toast(`⭐ Level up! You are now level <b>${lu.level}</b>`, 'good'); audio.play('unlock'); }, 1200);
+  for (const a of reward.achievements) setTimeout(() => toast(`🏆 Achievement unlocked: <b>${a.name}</b>`, 'good'), 1800);
+  setTimeout(() => audio.music('menu'), 2600);
+
+  const again = $('.again');
+  if (again) again.onclick = () => opts.mode === 'campaign' ? playCampaign(opts.level) : playPractice();
+  const next = $('.next');
+  if (next) next.onclick = () => playCampaign(nextLevel);
+  if (opts.mode === 'online') {
+    const S = session;
+    if (!S) { $('.rematch').classList.add('off'); }
+    $('.rematch').onclick = () => { if (!session) return; session.toLobby(); go('lobby'); };
+    $('.leave').onclick = () => { endSession(); go('home'); };
+    const offs = S ? [
+      S.on('rematch-request', () => { toast('😺 Your friend wants a rematch!', 'good'); audio.play('meow'); const b = $('.rematch'); if (b) b.classList.add('pulse'); }),
+      S.on('lobby', L => { if (L.phase === 'lobby' && !S.isHost) { /* host reset lobby; guest can join when ready */ } }),
+      S.on('peer-leave', () => { toast('😿 Your friend left the room', 'warn'); }),
+    ] : [];
+    return { leave: () => offs.forEach(f => f()) };
+  }
+};
+
+// ---------- Practice
+SCREENS.practice = () => {
+  const p = P.profile();
+  const sp = state.practice;
+  screens.innerHTML = `${topbar(true, 'Practice vs Computer')}
+    <div class="setup">
+      <div class="card panel"><h3>Your hero</h3><div class="pr-heroes"></div><div class="pr-detail"></div></div>
+      <div class="card panel">
+        <h3>Opponent</h3>
+        <div class="seg ai-seg">${Object.entries(AI_LEVELS).map(([k, v]) => `<button class="btn small ${sp.ai === k ? 'on' : ''}" data-ai="${k}">${v.name}<small>${k}</small></button>`).join('')}</div>
+        <div class="row"><label>Enemy hero:</label><select class="enemy-sel"><option value="random">🎲 Random</option>${HEROES.map(h => `<option value="${h.id}" ${sp.enemy === h.id ? 'selected' : ''}>${h.name}</option>`).join('')}</select></div>
+        <h3>Battlefield</h3><div class="pr-maps"></div>
+        <div class="pr-rules"></div>
+        <button class="btn primary huge start">⚔️ Start Battle</button>
+      </div>
+    </div>`;
+  wireGo();
+  let hero = P.heroUnlocked(p.equip.hero) ? p.equip.hero : 'whiskers';
+  const det = () => $('.pr-detail').innerHTML = heroDetail(HERO_BY_ID[hero]);
+  heroPicker($('.pr-heroes'), hero, id => { hero = id; P.equip('hero', id); det(); });
+  det();
+  mapPicker($('.pr-maps'), sp.map, id => { sp.map = id; });
+  $$('[data-ai]').forEach(b => b.onclick = () => { sp.ai = b.dataset.ai; $$('[data-ai]').forEach(x => x.classList.toggle('on', x === b)); });
+  $('.enemy-sel').onchange = ev => { sp.enemy = ev.target.value; };
+  const drawRules = () => { $('.pr-rules').innerHTML = rulesRow(sp.rules, false); $$('.pr-rules .rule-btn').forEach(b => b.onclick = () => { sp.rules = { ...sp.rules, [b.dataset.rule]: !sp.rules[b.dataset.rule] }; drawRules(); }); };
+  drawRules();
+  $('.start').onclick = () => playPractice();
+};
+function aiName() { return ['Sir Hiss-a-lot', 'Lady Scratchington', 'Baron Von Floof', 'Count Clawdius', 'Duke Nibbles', 'Madame Mischief', 'Lord Snugglepuss'][Math.floor(Math.random() * 7)]; }
+function playPractice() {
+  const p = P.profile();
+  const sp = state.practice;
+  const enemy = sp.enemy === 'random' ? HEROES[Math.floor(Math.random() * HEROES.length)].id : sp.enemy;
+  const seed = (Math.random() * 1e9) | 0;
+  const furs = FURS.map(f => f.id), hats = HATS.map(h => h.id);
+  beginMatch({
+    mode: 'practice', role: 'local', me: 0, aiLevel: sp.ai,
+    cfg: {
+      map: resolveMap(sp.map, seed), seed, timeLimit: 600, rules: { ...sp.rules },
+      players: [
+        { name: p.name, hero: p.equip.hero, fur: p.equip.fur, hat: p.equip.hat },
+        { name: aiName(), hero: enemy, fur: HERO_BY_ID[enemy].fur, hat: hats[Math.floor(Math.random() * hats.length)], ai: sp.ai },
+      ],
+    },
+  });
+}
+
+// ---------- Campaign
+SCREENS.campaign = () => {
+  const p = P.profile();
+  const unlockedUpTo = CAMPAIGN.reduce((n, l) => (p.campaign[l.id] ? Math.max(n, l.id + 1) : n), 1);
+  const stars = CAMPAIGN.reduce((a, l) => a + (p.campaign[l.id] || 0), 0);
+  screens.innerHTML = `${topbar(true, 'Campaign')}
+    <div class="campaign">
+      <div class="camp-head card">🗺️ <b>The Great Cat Kingdom</b> — defeat 12 rival heroes to become Top Cat. <span class="pill">★ ${stars}/${CAMPAIGN.length * 3}</span></div>
+      <div class="camp-path">${CAMPAIGN.map((l, k) => {
+        const done = p.campaign[l.id] || 0, locked = l.id > unlockedUpTo;
+        const e = HERO_BY_ID[l.enemy];
+        return `<div class="camp-node card ${locked ? 'locked' : 'clickable'} ${done ? 'done' : ''} ${l.id === unlockedUpTo ? 'current' : ''}" data-lv="${l.id}" style="--d:${k}">
+          <div class="cn-num">${l.id}</div>
+          <img src="${portrait(e.id, 96)}" alt="">
+          <div class="cn-name">${l.name}</div>
+          <div class="cn-stars">${[1, 2, 3].map(s => `<span class="${s <= done ? 'on' : ''}">★</span>`).join('')}</div>
+          <div class="cn-ai">${AI_LEVELS[l.ai].name}</div>
+          ${locked ? '<div class="cn-lock">🔒</div>' : ''}
+        </div>`;
+      }).join('')}</div>
+      <p class="muted small center">★ win · ★★ win in under 5 minutes · ★★★ also without losing a building</p>
+    </div>`;
+  wireGo();
+  $$('.camp-node.clickable').forEach(n => n.onclick = () => {
+    const l = CAMPAIGN.find(x => x.id === +n.dataset.lv);
+    const e = HERO_BY_ID[l.enemy];
+    let hero = P.heroUnlocked(p.equip.hero) ? p.equip.hero : 'whiskers';
+    const m = modal(`<div class="level-card">
+      <div class="lc-top"><img src="${portrait(e.id, 140)}"><div><div class="muted">Level ${l.id}</div><h2>${l.name}</h2>
+        <div>Enemy: <b>${e.name}</b> (${AI_LEVELS[l.ai].name} AI)</div><div>Map: <b>${MAP_BY_ID[l.map].name}</b></div>
+        <div>First clear: <b>+${l.reward} 🐟</b></div></div></div>
+      <div class="tip">💡 ${l.tip}</div>
+      <h3>Your hero</h3><div class="lc-heroes"></div>
+      <button class="btn primary huge go-level">⚔️ Fight!</button></div>`, { cls: 'wide' });
+    heroPicker($('.lc-heroes', m.el), hero, id => { hero = id; P.equip('hero', id); });
+    $('.go-level', m.el).onclick = () => { m.close(); playCampaign(l); };
+  });
+};
+function playCampaign(l) {
+  const p = P.profile();
+  const seed = 1000 + l.id * 17;
+  beginMatch({
+    mode: 'campaign', role: 'local', me: 0, aiLevel: l.ai, level: l,
+    cfg: {
+      map: resolveMap(l.map, seed), seed, timeLimit: 600,
+      players: [
+        { name: p.name, hero: p.equip.hero, fur: p.equip.fur, hat: p.equip.hat },
+        { name: HERO_BY_ID[l.enemy].name, hero: l.enemy, fur: HERO_BY_ID[l.enemy].fur, hat: l.id >= 11 ? 'crown' : 'none', ai: l.ai },
+      ],
+    },
+  });
+  setTimeout(() => { if (match && match.hud) match.hud.toast('💡 ' + l.tip, 'mine'); }, 3200);
+}
+
+// ---------- Heroes
+SCREENS.heroes = () => {
+  const p = P.profile();
+  const byClan = Object.keys(CLANS).map(c => ({ c, list: HEROES.filter(h => h.clan === c) }));
+  screens.innerHTML = `${topbar(true, 'Heroes')}
+    <div class="heroes">
+      <p class="center muted">Unlock new heroes with fish coins 🐟 earned from every battle. Each hero has a passive power and 3 unique spells.</p>
+      ${byClan.map(({ c, list }) => `<div class="clan-row"><h3 style="color:${CLANS[c].color}">${CLANS[c].icon} ${CLANS[c].name} <span class="muted small">${CLANS[c].desc}</span></h3>
+        <div class="hero-grid">${list.map(h => heroCard(h, { selected: p.equip.hero === h.id, locked: !P.heroUnlocked(h.id) })).join('')}</div></div>`).join('')}
+    </div>`;
+  wireGo();
+  $$('.hero-card').forEach(el => el.onclick = () => showHero(el.dataset.hero, () => go('heroes')));
+};
+
+// ---------- Shop
+SCREENS.shop = (params = {}) => {
+  const tab = params.tab || 'fur';
+  const p = P.profile();
+  const items = tab === 'fur' ? FURS : HATS;
+  screens.innerHTML = `${topbar(true, 'Cat Shop')}
+    <div class="shop">
+      <div class="shop-preview card"><img class="shop-cat" src="${catImg(p.equip.fur, p.equip.hat, 200, 0)}"><div><b>Your army looks like this!</b><div class="muted small">Every cat you send into battle wears your fur & hat.</div></div></div>
+      <div class="seg tabs"><button class="btn ${tab === 'fur' ? 'on' : ''}" data-tab="fur">🎨 Furs</button><button class="btn ${tab === 'hat' ? 'on' : ''}" data-tab="hat">🎩 Hats</button></div>
+      <div class="shop-grid">${items.map(it => {
+        const own = P.owns(tab, it.id), eq = p.equip[tab] === it.id;
+        const img = tab === 'fur' ? catImg(it.id, 'none', 120, 0) : catImg(p.equip.fur, it.id, 120, 0);
+        return `<div class="shop-item card clickable ${eq ? 'sel' : ''}" data-id="${it.id}">
+          <img src="${img}" alt=""><div class="si-name">${it.name}</div>
+          <div class="si-price">${eq ? '✔ Equipped' : own ? 'Owned · tap to wear' : `<span class="fish">🐟</span> ${it.cost}`}</div></div>`;
+      }).join('')}</div>
+    </div>`;
+  wireGo();
+  $$('[data-tab]').forEach(b => b.onclick = () => go('shop', { tab: b.dataset.tab }));
+  $$('.shop-item').forEach(el => el.onclick = () => {
+    const id = el.dataset.id;
+    if (P.owns(tab, id)) { P.equip(tab, id); audio.play('purr'); go('shop', { tab }); return; }
+    const it = items.find(x => x.id === id);
+    if (p.coins < it.cost) { audio.play('error'); toast(`Need ${it.cost - p.coins} more 🐟 — win battles to earn more!`, 'warn'); return; }
+    const m = modal(`<div class="center"><img src="${tab === 'fur' ? catImg(id, p.equip.hat, 160, 0) : catImg(p.equip.fur, id, 160, 0)}"><h2>${it.name}</h2>
+      <button class="btn primary big buy">Buy for <span class="fish">🐟</span> ${it.cost}</button></div>`);
+    $('.buy', m.el).onclick = () => {
+      const r = P.buy(tab, id);
+      if (!r.ok) { toast(r.msg, 'warn'); return; }
+      P.equip(tab, id); audio.play('unlock'); toast(`✨ New look: <b>${it.name}</b>!`, 'good');
+      for (const a of r.newAch || []) toast(`🏆 Achievement: <b>${a.name}</b> +${a.reward} 🐟`, 'good');
+      m.close(); go('shop', { tab });
+    };
+  });
+};
+
+// ---------- Profile
+SCREENS.profile = () => {
+  const p = P.profile();
+  const s = p.stats;
+  screens.innerHTML = `${topbar(true, 'Profile')}
+    <div class="profile">
+      <div class="card panel prof-head">
+        <img src="${catImg(p.equip.fur, p.equip.hat, 140, 0)}">
+        <div class="ph-main">
+          <div class="row"><input class="name-in" maxlength="16" value="${esc(p.name)}"><button class="btn small save-name">Save</button></div>
+          <div>Level <b>${p.level}</b></div>
+          <div class="xpbar"><div style="width:${Math.round(p.xp / P.xpForLevel(p.level) * 100)}%"></div><span>${p.xp}/${P.xpForLevel(p.level)} XP</span></div>
+        </div>
+      </div>
+      <div class="stat-grid">
+        ${[['⚔️', 'Battles', s.matches], ['🏆', 'Wins', s.wins], ['🌐', 'Online wins', `${s.onlineWins}/${s.onlineMatches}`], ['🔥', 'Best streak', s.bestStreak],
+          ['🏠', 'Captures', s.captures], ['✨', 'Spells', s.spells], ['🐱', 'Kittens made', Math.round(s.produced)], ['⚡', 'Fastest win', s.fastestWin ? `${Math.floor(s.fastestWin / 60)}:${String(s.fastestWin % 60).padStart(2, '0')}` : '-']]
+          .map(([i, l, v]) => `<div class="stat card"><div class="si">${i}</div><b>${v}</b><span>${l}</span></div>`).join('')}
+      </div>
+      <div class="card panel"><h3>🏆 Achievements (${Object.keys(p.ach).length}/${ACHIEVEMENTS.length})</h3>
+        <div class="ach-grid">${ACHIEVEMENTS.map(a => `<div class="ach ${p.ach[a.id] ? 'got' : ''}"><div class="ach-i">${p.ach[a.id] ? '🏆' : '🔒'}</div><div><b>${a.name}</b><div class="small">${a.desc}</div></div><div class="ach-r">+${a.reward}🐟</div></div>`).join('')}</div></div>
+      <div class="card panel"><h3>📜 Recent battles</h3>
+        ${p.history.length ? `<div class="hist">${p.history.map(h => `<div class="hist-row ${h.win ? 'w' : h.draw ? 'd' : 'l'}"><span>${h.win ? 'WIN' : h.draw ? 'DRAW' : 'LOSS'}</span><span>${h.mode}</span><span>vs ${esc(h.opp)}</span><span>${HERO_BY_ID[h.hero]?.name || ''}</span><span>${esc(h.map || '')}</span></div>`).join('')}</div>` : '<p class="muted">No battles yet. Go get \'em!</p>'}
+      </div>
+    </div>`;
+  wireGo();
+  $('.save-name').onclick = () => { P.setName($('.name-in').value); toast('Name saved!', 'good'); };
+};
+
+// ---------- How to play
+SCREENS.howto = () => {
+  screens.innerHTML = `${topbar(true, 'How to Play')}
+    <div class="howto">
+      <div class="card panel how">
+        <div class="how-i">👆</div><div><h3>1. Send your cats</h3><p><b>Drag</b> from one of your buildings to any other building. Half the cats inside march out (change it to 25/50/75/100% at the bottom left, with the mouse wheel, or Q/W/E/R).</p>
+        <p><b>Swipe</b> across several of your buildings before letting go to send from all of them at once!</p></div>
+      </div>
+      <div class="card panel how">
+        <div class="how-i">⚔️</div><div><h3>2. Capture buildings</h3><p>When your cats reach a stray or enemy building, they fight the cats inside. Knock them all out and the building becomes yours. Send cats to your own buildings to reinforce them. Squads that meet on the road fight too!</p></div>
+      </div>
+      <div class="card panel how buildings-how">
+        <div><h3>3. Know your buildings</h3>
+        <div class="bgrid">${Object.entries(BUILDINGS).map(([k, b]) => `<div class="bitem"><img src="${bImg(k, Math.min(2, b.maxLevel), 0, 110)}"><div><b>${b.icon} ${b.name}</b><div class="small">${b.desc}</div></div></div>`).join('')}</div>
+        <p><b>Tap</b> your building to <b>upgrade</b> it (costs cats) or <b>convert</b> it to another type. Double-tap to upgrade quickly.</p></div>
+      </div>
+      <div class="card panel how">
+        <div class="how-i">🌿</div><div><h3>4. Cast spells</h3><p>Your hero has 3 spells powered by <b>catnip</b>, which refills over time (faster with Catnip Gardens). Tap a spell (or press 1/2/3), then tap the map or a glowing building. Every hero also has a passive power.</p></div>
+      </div>
+      <div class="card panel how">
+        <div class="how-i">⭐</div><div><h3>5. Purr Power</h3><p>Capturing, upgrading and defending fill your Purr Power stars. Each star makes all your cats a bit stronger and faster. Losing buildings, losing cats or sitting idle drains it.</p></div>
+      </div>
+      <div class="card panel how">
+        <div class="how-i">🏆</div><div><h3>6. Win!</h3><p>Take every enemy building and squad to win. If the timer runs out, the biggest army wins. Every battle earns fish coins 🐟 to unlock heroes, furs and hats.</p></div>
+      </div>
+      <div class="center"><button class="btn primary big" data-go="practice">Try it vs the computer →</button></div>
+    </div>`;
+  wireGo();
+};
+
+// ---------- Settings
+SCREENS.settings = () => {
+  const s = P.profile().settings;
+  screens.innerHTML = `${topbar(true, 'Settings')}
+    <div class="settings card panel">
+      <label>🔊 Sound effects <input type="range" min="0" max="1" step="0.05" value="${s.sfx}" class="r-sfx"></label>
+      <label>🎵 Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" class="r-music"></label>
+      <label>🔇 Mute everything <input type="checkbox" class="c-mute" ${s.muted ? 'checked' : ''}></label>
+      <label>✨ Visual effects <select class="s-fx"><option value="high" ${s.fx === 'high' ? 'selected' : ''}>High</option><option value="medium" ${s.fx === 'medium' ? 'selected' : ''}>Medium</option><option value="low" ${s.fx === 'low' ? 'selected' : ''}>Low (older devices)</option></select></label>
+      <div class="net-info muted small"></div>
+      <hr>
+      <button class="btn danger small reset">Reset all progress</button>
+    </div>`;
+  wireGo();
+  $('.r-sfx').oninput = ev => { P.setSetting('sfx', +ev.target.value); audio.setVolumes({ sfx: +ev.target.value }); audio.play('meow'); };
+  $('.r-music').oninput = ev => { P.setSetting('music', +ev.target.value); audio.setVolumes({ music: +ev.target.value }); };
+  $('.c-mute').onchange = ev => { P.setSetting('muted', ev.target.checked); audio.setMuted(ev.target.checked); };
+  $('.s-fx').onchange = ev => P.setSetting('fx', ev.target.value);
+  detectServer().then(u => { $('.net-info').textContent = u ? `Online play: game server (${u})` : 'Online play: direct peer-to-peer (PeerJS)'; });
+  $('.reset').onclick = ev => {
+    if (!ev.target.dataset.sure) { ev.target.dataset.sure = 1; ev.target.textContent = 'Tap again to erase everything'; return; }
+    P.resetProfile(); toast('Progress reset', 'warn'); go('home');
+  };
+};
+
+export function handleDeepLink() {
+  const q = new URLSearchParams(location.search);
+  const room = cleanCode(q.get('room'));
+  if (room) {
+    history.replaceState(null, '', location.pathname);
+    const p = P.profile();
+    if (!p.seenTutorial) { p.seenTutorial = true; P.save(); }
+    go('friend', { code: room, auto: true });
+    return true;
+  }
+  return false;
+}

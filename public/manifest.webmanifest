@@ -1,0 +1,11 @@
+{
+  "name": "Whisker Wars",
+  "short_name": "Whisker Wars",
+  "description": "Real-time cat kingdom strategy battles",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#2b1d3a",
+  "theme_color": "#2b1d3a",
+  "icons": []
+}
