@@ -20,7 +20,7 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | Feature | Details |
 | --- | --- |
 | Online, 2-4 players | 5-number room codes + invite links (`?room=CODE`), lobby for 2, 3 or 4 players with hero/map/time pick (only maps for that many players), ready check, emotes, rematch, ping display, 20-second reconnect if someone's connection drops (with 3-4 players, someone who doesn't come back is knocked out and the battle carries on) |
-| Friends | Every player has an 8-number friend code. Add friends by code, or with one tap on the player you just battled in the lobby. Friends with the game open show as online; tap **Invite** and they get a popup that drops them straight into your room |
+| Friends | Every player has an 8-number friend code. Add friends by code, or with one tap on the player you just battled in the lobby. Friends with the game open show as online. The lobby lists them at the top (with people you played recently): tap **Invite** and they get a popup that drops them straight into your room |
 | Fun modifiers | Zoomies (fast cats), Catnip Frenzy, Kitten Boom, Big Start — toggle in the lobby or practice setup |
 | 12 heroes | 4 clans, each hero has a passive + 3 spells (36 spells), unlocked with fish coins earned by playing |
 | 5 building types | Kitten Cottage (5 levels), Scratch Tower, Yarn Forge, Catnip Garden, Grand Cat Tree. Upgrade or convert any time |
@@ -45,8 +45,8 @@ Joining tries the server first, then peer-to-peer, so both kinds of rooms work f
 
 A room holds up to 4 players: the host runs the battle and streams it to up to 3 guests.
 
-Friends (online status and invites) always go peer-to-peer: a player with friends keeps a small PeerJS
-"presence" peer open while the game is open, and an invite is a short message carrying the room code.
+Friends (online status and invites) always go peer-to-peer: once a player has opened Battle a Friend (or has friends)
+they keep a small PeerJS "presence" peer open while the game is open, and an invite is a short message carrying the room code.
 
 ## Deploying
 

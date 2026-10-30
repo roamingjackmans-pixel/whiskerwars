@@ -49,6 +49,18 @@ export function removeFriend(code) {
   presence.status.delete(code);
   emit('change');
 }
+// players you met in an online room (not friends yet): the lobby lists them as "played recently" so you can invite them again
+const MAX_RECENT = 6;
+export function recentPlayers() { const p = profile(); if (!Array.isArray(p.recent)) p.recent = []; return p.recent.filter(r => !isFriend(r.code)); }
+export function noteRecent(code, name) {
+  code = cleanFriendCode(code);
+  if (code.length !== 8 || code === myFriendCode() || isFriend(code)) return;
+  const p = profile(), old = (p.recent || []).find(r => r.code === code);
+  if (old && old.name === cleanName(name) && Date.now() - old.at < 60000) return;
+  p.recent = [{ code, name: cleanName(name), at: Date.now() }, ...(p.recent || []).filter(r => r.code !== code && !isFriend(r.code))].slice(0, MAX_RECENT);
+  save();
+  emit('change');
+}
 function cleanName(n) { return String(n || '').replace(/[<>]/g, '').trim().slice(0, 16) || 'Friend'; }
 function rename(code, name) {
   const f = friends().find(x => x.code === code);
@@ -147,7 +159,7 @@ class Presence {
       .catch(why => { if (why !== 'superseded') this.setStatus(code, 'offline'); });
   }
   checkAll() {
-    friends().forEach((f, k) => setTimeout(() => this.check(f.code, true), k * 350));
+    [...friends(), ...recentPlayers()].forEach((f, k) => setTimeout(() => this.check(f.code, true), k * 350));
   }
   /** Keep checking while a friends list is showing. Returns a stop function. */
   watch() {
@@ -187,6 +199,7 @@ class Presence {
       const code = cleanFriendCode(m.code), name = cleanName(m.name);
       if (code.length !== 8 || code === myFriendCode()) return;
       if (isFriend(code)) { rename(code, name); this.setStatus(code, 'online'); }
+      else if (recentPlayers().some(r => r.code === code)) this.setStatus(code, 'online');
       if (m.type === 'hello') {
         conn.send({ type: 'hi', v: 1, code: myFriendCode(), name: profile().name, busy: !!busyCheck() });
         // someone added us: offer to add them back (once per visit)
@@ -213,8 +226,14 @@ class Presence {
 }
 export const presence = new Presence();
 
-/** Call once at startup: friends stay reachable while the game is open (only if you have any). */
+/** Call once at startup: you stay reachable while the game is open once you have friends or have played online. */
 export function initFriends() {
   myFriendCode();
-  if (friends().length) presence.start();
+  if (friends().length || recentPlayers().length || profile().friendsOn) presence.start();
+}
+/** Opening Battle a Friend makes you reachable (now and on later visits): friends see you online and can invite you. */
+export function beReachable() {
+  const p = profile();
+  if (!p.friendsOn) { p.friendsOn = true; save(); }
+  return presence.start();
 }

@@ -10,7 +10,7 @@ import { OnlineSession } from './online.js';
 import { detectServer, cleanCode } from './net.js';
 import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
 import { normalizeObstacles } from '../shared/nav.js';
-import { initFriends, presence, friends, addFriend, removeFriend, isFriend, myFriendCode, fmtFriendCode, cleanFriendCode, onFriends, setBusyCheck } from './friends.js';
+import { initFriends, presence, friends, addFriend, removeFriend, isFriend, myFriendCode, fmtFriendCode, cleanFriendCode, onFriends, setBusyCheck, recentPlayers, noteRecent, beReachable } from './friends.js';
 import { isPhone, applyDeviceClass, enterFullscreen, keepAwake, deviceSummary, desktopSiteMode } from './device.js';
 import { BUILD, isDev, versionLabel, fetchLatest, isNewer, reloadTo } from './update.js';
 
@@ -24,7 +24,9 @@ const bImg = (t, l, o, s = 96) => safe(buildingPreviewURL, t, l, o, s);
 
 let canvas, screens, hudRoot, modalRoot, toastRoot;
 let attract = null, match = null, session = null;
-let sentInvite = null;   // the friend invite for the room you are hosting, if any
+const sentInvites = new Map();   // friend code -> invite waiting for an answer (for the room you are in)
+const comingFriends = new Map(); // friend code -> when they said yes (shown as "joining" for a little while)
+let inviteChanged = () => { };   // the lobby redraws its invite list through this
 let current = null;
 const state = { practice: { map: 'meadow', ai: 'normal', enemy: 'random', rules: {}, players: 2 }, lastCampaign: null };
 
@@ -447,7 +449,7 @@ SCREENS.friend = (params = {}) => {
 
   // ---- friends
   const list = $('.fp-list');
-  const STATE = { online: ['on', 'Online'], busy: ['busy', 'In a battle'], offline: ['off', 'Offline'], checking: ['chk', 'Checking…'] };
+  const STATE = { online: ['on', 'Online'], busy: ['busy', 'Playing'], offline: ['off', 'Offline'], checking: ['chk', 'Checking…'] };
   const drawFriends = () => {
     if (!list.isConnected) return;
     const fs = friends();
@@ -479,6 +481,7 @@ SCREENS.friend = (params = {}) => {
   fcIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') add(); });
   $('.copy-fc').onclick = () => navigator.clipboard?.writeText(myFriendCode()).then(() => toast('📋 Friend code copied!', 'good'), () => toast(myFriendCode()));
   const offChange = onFriends('change', drawFriends);
+  beReachable();
   const stopWatch = presence.watch();
   drawFriends();
   return { leave: () => { offChange(); stopWatch(); } };
@@ -486,26 +489,43 @@ SCREENS.friend = (params = {}) => {
 
 /** Make a room and invite a friend into it. */
 async function inviteFriend(code, btn) {
-  const f = friends().find(x => x.code === code);
-  if (!f) return;
+  if (!friends().some(x => x.code === code)) return;
   btn.disabled = true; btn.textContent = 'Inviting…';
   try { endSession(); session = await OnlineSession.host(); }
   catch (e) { console.error(e); toast('😿 Could not create a room: ' + esc(e.message || e), 'warn'); btn.disabled = false; btn.textContent = '⚔️ Invite'; return; }
-  const S = session, inv = presence.invite(code, S.code);
-  sentInvite = inv;
   go('lobby');
-  toast(`📨 Invite sent to <b>${esc(f.name)}</b>…`, 'good');
-  const ans = await inv;
-  if (session !== S || sentInvite !== inv) return;
-  sentInvite = null;
-  if (ans === 'yes') toast(`😺 <b>${esc(f.name)}</b> is on the way!`, 'good');
-  else if (ans === 'busy') toast(`⚔️ <b>${esc(f.name)}</b> is in a battle right now`, 'warn');
-  else if (ans === 'offline') toast(`😿 Couldn't reach <b>${esc(f.name)}</b>. Send them the room code instead.`, 'warn');
-  else if (ans !== 'cancelled' && !S.peerHere) toast(`😿 <b>${esc(f.name)}</b> can't play right now`, 'warn');
+  sendInvite(code);
+}
+
+const inRoom = (S, code) => !!S && S.lobby.players.some(pl => pl && pl.fc === code);
+const personName = code => (friends().find(x => x.code === code) || recentPlayers().find(x => x.code === code) || { name: 'Your friend' }).name;
+
+/** Invite a friend (or someone you played recently) into the room you are in. They get a pop-up and one tap joins. */
+function sendInvite(code) {
+  const S = session;
+  if (!S || sentInvites.has(code)) return;
+  const name = personName(code);
+  const inv = presence.invite(code, S.code);
+  sentInvites.set(code, inv);
+  comingFriends.delete(code);
+  inviteChanged();
+  toast(`📨 Invite sent to <b>${esc(name)}</b>…`, 'good');
+  inv.then(ans => {
+    if (sentInvites.get(code) !== inv) return;
+    sentInvites.delete(code);
+    if (session !== S) return;
+    if (ans === 'yes') { comingFriends.set(code, Date.now()); setTimeout(() => { comingFriends.delete(code); inviteChanged(); }, 20000); toast(`😺 <b>${esc(name)}</b> is on the way!`, 'good'); }
+    else if (ans === 'busy') toast(`⚔️ <b>${esc(name)}</b> is already playing right now`, 'warn');
+    else if (ans === 'offline') toast(`😿 Couldn't reach <b>${esc(name)}</b>. Send them the room code instead.`, 'warn');
+    else if (ans !== 'cancelled' && !inRoom(S, code)) toast(`😿 <b>${esc(name)}</b> can't play right now`, 'warn');
+    inviteChanged();
+  });
 }
 
 function endSession() {
-  if (sentInvite) { sentInvite.cancel(); sentInvite = null; }
+  for (const inv of sentInvites.values()) inv.cancel();
+  sentInvites.clear();
+  comingFriends.clear();
   if (session) { session.close(); session = null; }
 }
 
@@ -520,7 +540,15 @@ SCREENS.lobby = () => {
   screens.innerHTML = `${topbar(false, 'Battle Lobby')}
     <div class="lobby">
       <div class="room card">
-        <div class="room-l">ROOM CODE</div>
+        <div class="invite-box">
+          <div class="ib-head"><b>😺 Invite friends</b><span class="ib-note muted small"></span><button class="btn small ib-addbtn">➕ Add friend</button></div>
+          <div class="ib-add" hidden>
+            <div class="fp-add"><input class="fc-in" maxlength="9" placeholder="Friend's code" inputmode="numeric" autocomplete="off"><button class="btn small primary add-fc">➕ Add</button></div>
+            <div class="fp-me small">Your friend code <b class="fp-code">${fmtFriendCode(myFriendCode())}</b> <button class="btn small copy-fc">📋 Copy</button></div>
+          </div>
+          <div class="ib-list"></div>
+        </div>
+        <div class="room-l">OR SEND THE ROOM CODE</div>
         <div class="room-code">${S.code.split('').map(c => `<span>${c}</span>`).join('')}</div>
         <div class="row center">
           <button class="btn small copy-code">📋 Copy code</button>
@@ -551,6 +579,60 @@ SCREENS.lobby = () => {
   $('.copy-link').onclick = () => copy(link, 'Invite link');
   const sh = $('.share'); if (sh) sh.onclick = () => navigator.share({ title: 'Whisker Wars', text: `Battle me in Whisker Wars! Room code: ${S.code}`, url: link }).catch(() => { });
   $('.leave').onclick = () => { endSession(); go('home'); };
+
+  // ---- invite friends: online friends (and people you played recently) get a pop-up, one tap joins this room
+  const ibList = $('.ib-list'), ibAdd = $('.ib-add'), ibNote = $('.ib-note'), fcIn = $('.fc-in', ibAdd);
+  const SHOW = isPhone() ? 4 : 6, DOT = { online: 'on', busy: 'busy', checking: 'chk', offline: 'off' };
+  let ibAll = false, stopWatch = null;
+  const watch = () => { if (!stopWatch && (friends().length || recentPlayers().length)) stopWatch = presence.watch(); };
+  const drawInvites = () => {
+    if (!ibList.isConnected) return;
+    watch();
+    const L = S.lobby, size = L.size || 2, full = S.joined() >= size;
+    const st = c => (presence.status.get(c) || { state: 'checking' }).state;
+    const people = [...friends().map(f => ({ ...f, recent: false })), ...recentPlayers().map(r => ({ ...r, recent: true }))];
+    if (!people.length) {
+      ibNote.textContent = '';
+      ibList.innerHTML = '<div class="ib-empty muted small">No friends yet. Add one with their friend code, or tap <b>➕ Add friend</b> on someone you battle.</div>';
+      return;
+    }
+    const rank = f => inRoom(S, f.code) ? 0 : comingFriends.has(f.code) || sentInvites.has(f.code) ? 1 : ({ online: 2, busy: 3, checking: 4 }[st(f.code)] ?? 5) + (f.recent ? 0.5 : 0);
+    people.sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+    const online = people.filter(f => st(f.code) === 'online' && !inRoom(S, f.code)).length;
+    ibNote.textContent = full ? (S.isHost && size < 4 ? 'Room full: pick more players below to invite more' : 'Room full') : online ? `${online} online` : '';
+    ibList.innerHTML = (ibAll ? people : people.slice(0, SHOW)).map(f => {
+      const s = st(f.code), here = inRoom(S, f.code), sent = sentInvites.has(f.code), coming = comingFriends.has(f.code);
+      const label = here ? '✔ Here' : coming ? '🐾 Joining' : sent ? '📨 Sent' : s === 'online' ? '⚔️ Invite' : s === 'busy' ? 'Playing' : s === 'checking' ? '…' : 'Offline';
+      const can = !here && !sent && !coming && s === 'online' && !full;
+      return `<div class="ib-f ${here ? 'here' : DOT[s] || 'off'}" data-code="${f.code}"><span class="fp-dot"></span>
+        <span class="ib-n"><b>${esc(f.name)}</b>${f.recent ? '<small>played recently</small>' : ''}</span>
+        ${f.recent ? `<button class="btn small ib-plus" title="Add ${esc(f.name)} as a friend" aria-label="Add ${esc(f.name)} as a friend">➕</button>` : ''}
+        <button class="btn small ${can ? 'primary' : ''} ib-inv" ${can ? '' : 'disabled'}>${label}</button></div>`;
+    }).join('') + (people.length > SHOW ? `<button class="btn small ib-more">${ibAll ? 'Show fewer' : `Show all ${people.length}`}</button>` : '');
+    $$('.ib-inv', ibList).forEach(b => b.onclick = () => sendInvite(b.closest('.ib-f').dataset.code));
+    $$('.ib-plus', ibList).forEach(b => b.onclick = () => {
+      const c = b.closest('.ib-f').dataset.code, n = personName(c), r = addFriend(c, n);
+      toast(r.ok ? `😺 <b>${esc(n)}</b> is now your friend` : r.msg, r.ok ? 'good' : 'warn');
+    });
+    const more = $('.ib-more', ibList); if (more) more.onclick = () => { ibAll = !ibAll; drawInvites(); };
+  };
+  if (!friends().length && !recentPlayers().length) ibAdd.hidden = false;
+  $('.ib-addbtn').onclick = () => { ibAdd.hidden = !ibAdd.hidden; if (!ibAdd.hidden) fcIn.focus(); };
+  fcIn.addEventListener('input', () => { fcIn.value = fmtFriendCode(fcIn.value); });
+  const addFc = () => {
+    const r = addFriend(cleanFriendCode(fcIn.value));
+    if (!r.ok) { toast(r.msg, 'warn'); audio.play('error'); return; }
+    toast(r.already ? 'Already your friend' : '😺 Friend added! Checking if they are online…', 'good');
+    fcIn.value = ''; ibAdd.hidden = true;
+    drawInvites();
+  };
+  $('.add-fc', ibAdd).onclick = addFc;
+  fcIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') addFc(); });
+  $('.copy-fc', ibAdd).onclick = () => copy(myFriendCode(), 'Friend code');
+  inviteChanged = drawInvites;
+  const offFriends = onFriends('change', drawInvites);
+  beReachable();
+
   let myHero = p.equip.hero;
   const drawDetail = () => { $('.lobby-hero-detail').innerHTML = heroDetail(HERO_BY_ID[myHero]); };
   heroPicker($('.lobby-heroes'), myHero, id => { myHero = id; P.equip('hero', id); S.setPick({ hero: id }); if (S.lobby.ready[S.me]) S.setReady(false); drawDetail(); });
@@ -589,6 +671,7 @@ SCREENS.lobby = () => {
     const me = S.me, size = L.size || 2;
     // you first, then everyone else in seat order (each seat has its team colour)
     const seats = [me, ...Array.from({ length: size }, (_, k) => k).filter(k => k !== me)];
+    for (const [k, pl] of L.players.entries()) if (pl && k !== me && pl.fc) noteRecent(pl.fc, pl.name);
     const box = $('.lobby-seats');
     box.className = 'lobby-seats n' + size;
     box.innerHTML = seats.map((k, n) => (n === 1 && size === 2 ? '<div class="vs">VS</div>' : '') + slot(L.players[k], k, L.ready[k])).join('');
@@ -616,6 +699,7 @@ SCREENS.lobby = () => {
       rb.classList.toggle('on', !!L.ready[me]);
       st.innerHTML = L.ready[me] ? 'Waiting for the host to start...' : 'Pick your hero, then press Ready.';
     }
+    drawInvites();
   };
   $('.ready-btn').onclick = () => {
     if (S.isHost) {
@@ -633,7 +717,7 @@ SCREENS.lobby = () => {
     S.on('error', e => { toast('😿 ' + esc(e.message), 'warn'); if (/full/i.test(e.message)) { endSession(); go('friend'); } }),
   ];
   render();
-  return { leave: () => offs.forEach(f => f()) };
+  return { leave: () => { offs.forEach(f => f()); offFriends(); if (stopWatch) stopWatch(); inviteChanged = () => { }; } };
 };
 
 function startOnline() {
@@ -783,6 +867,7 @@ function onMatchEnd(m, opts, res) {
 }
 
 // ---------- Results
+const shortName = n => { const w = String(n || '').split(' ')[0]; return w.length > 8 ? w.slice(0, 7) + '…' : w; };
 SCREENS.results = ({ res, opts, reward }) => {
   const info = res.info, me = res.me;
   const others = info.players.map((_, i) => i).filter(i => i !== me), opp = others[0];
@@ -791,7 +876,7 @@ SCREENS.results = ({ res, opts, reward }) => {
   const S = res.stats || [];
   const cols = [me, ...others];
   const row = (label, key) => `<tr><td>${label}</td>${cols.map(i => `<td>${S[i] ? S[i][key] : '-'}</td>`).join('')}</tr>`;
-  const head = `<tr><th></th>${cols.map(i => `<th>${i === me ? 'You' : many ? esc(info.players[i].name.split(' ')[0]) : 'Them'}</th>`).join('')}</tr>`;
+  const head = `<tr><th></th>${cols.map(i => `<th>${i === me ? 'You' : many ? esc(shortName(info.players[i].name)) : 'Them'}</th>`).join('')}</tr>`;
   const p = P.profile();
   const nh = reward.nextHero;
   const isCampaign = opts.mode === 'campaign';
