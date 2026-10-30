@@ -3,6 +3,8 @@
 Real-time cat-kingdom strategy for the browser. Drag to send your army of adorable cats, capture cottages,
 cast silly spells and battle your friends online with a 5-letter room code.
 
+**Play:** https://josephjackman.com/whiskerwars/
+
 ## Play locally
 
 ```bash
@@ -43,6 +45,10 @@ Joining tries the server first, then peer-to-peer, so both kinds of rooms work f
 ### Option A — any static website (easiest)
 Upload the contents of `public/` to any web host (GitHub Pages, Netlify, Cloudflare Pages, your own site,
 or a sub-folder of one). It runs in peer-to-peer mode. Done.
+
+This repo already does this: `.github/workflows/pages.yml` publishes `public/` to GitHub Pages on every
+push to `main`. The site appears under the account's custom domain at `/whiskerwars/` because the repo
+is named `whiskerwars`.
 
 ### Option B — Node server (most reliable online play)
 Deploy this whole folder to any Node host that supports WebSockets (Render, Railway, Fly.io, a VPS):

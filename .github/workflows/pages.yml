@@ -24,6 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+      # Pages only serves static files, so play peer-to-peer there.
+      # A custom wss:// server URL in config.js is left alone.
+      - run: sed -i "s/server: 'auto'/server: 'p2p'/" public/config.js
       - uses: actions/upload-pages-artifact@v4
         with:
           path: public
