@@ -20,7 +20,7 @@ const MIME = {
   '.txt': 'text/plain; charset=utf-8', '.webp': 'image/webp', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg',
 };
 
-/** code -> { host, guest, created } */
+/** code -> { host, guests: Map(seat 1-3 -> socket), created } */
 const rooms = new Map();
 let totalConnections = 0;
 
@@ -71,6 +71,8 @@ function send(ws, obj) {
   if (ws && ws.readyState === 1) ws.send(typeof obj === 'string' ? obj : JSON.stringify(obj));
 }
 
+const MAX_GUESTS = 3; // rooms hold up to 4 players
+
 function leaveRoom(ws) {
   const code = ws.room;
   if (!code) return;
@@ -78,12 +80,11 @@ function leaveRoom(ws) {
   ws.room = null;
   if (!room) return;
   if (room.host === ws) {
-    send(room.guest, { t: 'peer-leave' });
-    if (room.guest) room.guest.room = null;
+    for (const g of room.guests.values()) { send(g, { t: 'peer-leave', slot: 0 }); g.room = null; }
     rooms.delete(code);
-  } else if (room.guest === ws) {
-    room.guest = null;
-    send(room.host, { t: 'peer-leave' });
+  } else if (room.guests.get(ws.slot) === ws) {
+    room.guests.delete(ws.slot);
+    send(room.host, { t: 'peer-leave', slot: ws.slot });
   }
 }
 
@@ -103,7 +104,7 @@ wss.on('connection', (ws, req) => {
       case 'host': {
         leaveRoom(ws);
         const code = newCode();
-        rooms.set(code, { host: ws, guest: null, created: Date.now() });
+        rooms.set(code, { host: ws, guests: new Map(), created: Date.now() });
         ws.room = code;
         send(ws, { t: 'hosted', code });
         break;
@@ -113,25 +114,32 @@ wss.on('connection', (ws, req) => {
         const room = rooms.get(code);
         if (!room) return send(ws, { t: 'error', code: 'notfound', msg: 'Room not found' });
         if (room.host === ws) return send(ws, { t: 'error', code: 'self', msg: 'That is your own room' });
-        if (room.guest && room.guest !== ws) {
-          // the same player reconnecting replaces their stale connection
-          if (m.pid && room.guest.pid === m.pid) { const old = room.guest; old.room = null; try { old.terminate(); } catch {} room.guest = null; }
-          else return send(ws, { t: 'error', code: 'full', msg: 'Room is full' });
+        const pid = String(m.pid || '').slice(0, 32);
+        // the same player reconnecting takes back their seat and replaces their stale connection
+        let slot = 0;
+        for (const [s, g] of room.guests) if (pid && g.pid === pid && g !== ws) { slot = s; g.room = null; try { g.terminate(); } catch {} room.guests.delete(s); }
+        if (!slot) {
+          for (let s = 1; s <= MAX_GUESTS && !slot; s++) if (!room.guests.has(s)) slot = s;
+          if (!slot) return send(ws, { t: 'error', code: 'full', msg: 'Room is full' });
         }
         leaveRoom(ws);
-        room.guest = ws;
+        room.guests.set(slot, ws);
         ws.room = code;
-        ws.pid = String(m.pid || '').slice(0, 32);
-        send(ws, { t: 'joined', code });
-        send(room.host, { t: 'peer-join' });
+        ws.slot = slot;
+        ws.pid = pid;
+        send(ws, { t: 'joined', code, slot });
+        send(room.host, { t: 'peer-join', slot });
         break;
       }
       case 'msg': {
         const room = rooms.get(ws.room);
         if (!room) return;
-        const other = room.host === ws ? room.guest : room.host;
-        // forward without re-serializing the payload twice
-        if (other && other.readyState === 1) other.send(JSON.stringify({ t: 'msg', d: m.d }));
+        if (room.host === ws) {
+          // host -> one guest (to = seat) or everyone
+          const out = JSON.stringify({ t: 'msg', d: m.d, from: 0 });
+          if (m.to) { const g = room.guests.get(m.to); if (g && g.readyState === 1) g.send(out); }
+          else for (const g of room.guests.values()) if (g.readyState === 1) g.send(out);
+        } else if (room.host && room.host.readyState === 1) room.host.send(JSON.stringify({ t: 'msg', d: m.d, from: ws.slot }));
         break;
       }
       case 'leave': leaveRoom(ws); break;
@@ -155,7 +163,7 @@ setInterval(() => {
   }
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (!room.guest && now - room.created > 3 * 3600 * 1000) { try { room.host.close(); } catch {} rooms.delete(code); }
+    if (!room.guests.size && now - room.created > 3 * 3600 * 1000) { try { room.host.close(); } catch {} rooms.delete(code); }
   }
 }, 25000);
 

@@ -31,7 +31,8 @@ export class Game {
     this.rng = mulberry32((cfg.seed || 1) >>> 0);
     this.time = 0;
     this.tickNo = 0;
-    this.timeLimit = cfg.timeLimit ?? TIME_LIMIT;
+    // more players, more to conquer: 3-4 player battles get 15 minutes unless the lobby picked a time
+    this.timeLimit = cfg.timeLimit ?? (cfg.players.length > 2 ? TIME_LIMIT * 1.5 : TIME_LIMIT);
     this.rules = cfg.rules || {};
     this.players = cfg.players.map((p, i) => ({
       idx: i, name: p.name || ('Player ' + (i + 1)), heroId: p.hero, hero: HERO_BY_ID[p.hero] || HERO_BY_ID.whiskers,
@@ -692,7 +693,10 @@ export class Game {
     p.alive = false;
     this.emit({ k: 'out', o: i, why });
     const alive = this.players.filter(q => q.alive);
-    if (alive.length <= 1) this.finish(alive.length ? alive[0].idx : -1, why);
+    if (alive.length <= 1) { this.finish(alive.length ? alive[0].idx : -1, why); return; }
+    // 3-4 players and the battle goes on: a player who leaves or surrenders leaves stray buildings behind
+    for (const b of this.buildings) if (b.owner === i) { b.owner = -1; b.fx = {}; b.hackBy = -1; b.full = b.count; this.emit({ k: 'cap', b: b.id, o: -1, prev: i, bonus: 0, spell: 0, down: 0 }); }
+    for (let k = this.squads.length - 1; k >= 0; k--) if (this.squads[k].owner === i) this.removeSquad(this.squads[k], 'pop');
   }
   checkEnd() {
     for (const p of this.players) {
@@ -722,8 +726,8 @@ export class Game {
   // ---------- network views ----------
   staticInfo() {
     return {
-      map: { id: this.cfg.map.id, name: this.cfg.map.name, theme: this.cfg.map.theme, seed: this.cfg.seed, obstacles: this.cfg.map.obstacles || [] },
-      buildings: this.buildings.map(b => ({ id: b.id, x: b.x, y: b.y, r: this.nav.radiusOf(b.id) })),
+      map: { id: this.cfg.map.id, name: this.cfg.map.name, theme: this.cfg.map.theme, seed: this.cfg.seed, obstacles: this.cfg.map.obstacles || [], players: this.players.length, rot3: this.cfg.map.rot3 || null },
+      buildings: this.buildings.map(b => ({ id: b.id, x: b.x, y: b.y, r: this.nav.radiusOf(b.id), o: this.cfg.map.buildings.find(m => m.id === b.id)?.owner ?? -1 })),
       players: this.players.map(p => ({ name: p.name, hero: p.heroId, fur: p.fur, hat: p.hat, ai: p.ai })),
       timeLimit: this.timeLimit,
       rules: this.rules,

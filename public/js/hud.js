@@ -25,18 +25,21 @@ export class Hud {
 
   setup(info, me) {
     this.info = info; this.me = me;
-    const opp = me === 0 ? 1 : 0;
-    this.opp = opp;
     const P = info.players;
+    // everyone else, in seat order (2 players: just the one opponent)
+    this.opps = P.map((_, i) => i).filter(i => i !== me);
+    const opp = this.opps[0];
+    this.opp = opp;
+    const many = this.opps.length > 1;
     const card = (i, side) => {
       const h = HERO_BY_ID[P[i].hero];
       const c = teamColor(i);
-      return `<div class="pcard ${side}" style="--tc:${c.main};--td:${c.dark}">
+      return `<div class="pcard ${side}${many && side === 'opp' ? ' mini' : ''}" data-o="${i}" style="--tc:${c.main};--td:${c.dark}">
         <img class="portrait" src="${safeURL(h.id, 96)}" alt="">
         <div class="pinfo">
           <div class="pname">${esc(P[i].name)}${P[i].ai ? ' <span class="tag">AI</span>' : ''}</div>
           <div class="phero">${h.name}</div>
-          <div class="pmeta">${purrMeter(side)}<span class="bcount" title="Buildings">🏠 0</span></div>
+          <div class="pmeta">${purrMeter(side === 'me' ? 'me' : String(i))}<span class="bcount" title="Buildings">🏠 0</span></div>
         </div>
         <div class="emote-pop"></div>
       </div>`;
@@ -46,11 +49,12 @@ export class Hud {
     if (phone) this.root.classList.add('phone');
     const rules = RULES.filter(r => info.rules && info.rules[r.id]);
     const ruleIcons = rules.length ? `<div class="rule-icons">${rules.map(r => `<span title="${r.name}: ${r.desc}">${r.icon}</span>`).join('')}</div>` : '';
+    // one coloured share of the bar per player: you first, then the others
     const armybar = `<div class="armybar" title="Total cats (yours vs theirs)">
-            <div class="fill me" style="background:${teamColor(me).main}"></div>
-            <div class="fill opp" style="background:${teamColor(opp).main}"></div>
+            ${[me, ...this.opps].map(i => `<div class="fill${i === me ? ' me' : ''}" data-o="${i}" style="background:${teamColor(i).main}"></div>`).join('')}
             <span class="l">0</span><span class="r">0</span>
           </div>`;
+    const oppCards = `<div class="opps${many ? ' many' : ''}">${this.opps.map(o => card(o, 'opp')).join('')}</div>`;
     const spellBtns = hero.spells.map((s, k) => `<button class="spell" data-slot="${k}">
               <span class="sicon">${s.icon}</span><span class="scost">${s.cost}</span>
               <div class="scd"></div><span class="scdtxt"></span>${phone ? '' : `<kbd>${k + 1}</kbd>`}</button>`).join('');
@@ -65,7 +69,7 @@ export class Hud {
           ${ruleIcons}
           ${armybar}
         </div>
-        ${card(opp, 'opp')}
+        ${oppCards}
       </div>
       <div class="hud-bottom">
         <div class="pct" title="How many cats to send (wheel or Q/W/E/R)">
@@ -83,13 +87,13 @@ export class Hud {
       </div>`;
     // Phones: slim top bar and a thumb dock at the bottom (CSS arranges both for portrait or landscape).
     const phoneHtml = `
-      <div class="ph-top">
+      <div class="ph-top${many ? ' many' : ''}">
         ${card(me, 'me')}
         <div class="hud-center">
           <div class="timer">--:--</div>
           ${armybar}
         </div>
-        ${card(opp, 'opp')}
+        ${oppCards}
         ${ruleIcons}
       </div>
       <div class="ph-dock">
@@ -123,10 +127,11 @@ export class Hud {
     const $ = s => this.root.querySelector(s);
     this.$ = $;
     this.els = {
-      timer: $('.timer'), fillMe: $('.armybar .fill.me'), fillOpp: $('.armybar .fill.opp'), armyL: $('.armybar .l'), armyR: $('.armybar .r'),
+      timer: $('.timer'), fills: [...this.root.querySelectorAll('.armybar .fill')], armyL: $('.armybar .l'), armyR: $('.armybar .r'),
+      cards: [...this.root.querySelectorAll('.pcard[data-o]')],
       catFill: $('.catnip-fill'), catTxt: $('.catnip-txt'), spells: [...this.root.querySelectorAll('.spell')],
       purr: [...this.root.querySelectorAll('.purr')].map(e => ({ e, side: e.dataset.side, stars: [...e.querySelectorAll('.ps')], bonus: e.querySelector('.pb'), n: -1, v: -1 })),
-      bMe: [...this.root.querySelectorAll('.pcard.me .bcount, .mystat .bcount')], bOpp: $('.pcard.opp .bcount'),
+      bMe: [...this.root.querySelectorAll('.pcard.me .bcount, .mystat .bcount')], bOpp: [...this.root.querySelectorAll('.pcard.opp .bcount')],
       toasts: $('.toasts'), bmenu: $('.bmenu'), tip: $('.spell-tip'), wheel: $('.emote-wheel'), hint: $('.targeting-hint'), ping: $('.ping'),
     };
     this.root.querySelectorAll('.pct-btn').forEach(b => b.addEventListener('click', () => this.m.setPct(+b.dataset.p)));
@@ -261,16 +266,20 @@ export class Hud {
     this.acc = 0;
     const me = V.players[this.me], op = V.players[this.opp];
     if (!me || !op) return;
+    const others = this.opps.map(i => V.players[i]).filter(Boolean);
     const remain = (V.timeLimit || 600) - V.t;
     this.els.timer.textContent = fmtTime(remain);
     this.els.timer.classList.toggle('low', remain < 60);
     if (!this.tense && remain < 90 && !this.m.over) { this.tense = true; audio.music('tense'); }
-    const tot = Math.max(1, me.army + op.army);
-    this.els.fillMe.style.width = (me.army / tot * 100) + '%';
-    this.els.fillOpp.style.width = (op.army / tot * 100) + '%';
-    this.els.armyL.textContent = me.army; this.els.armyR.textContent = op.army;
+    const tot = Math.max(1, me.army + others.reduce((a, p) => a + p.army, 0));
+    for (const f of this.els.fills) { const p = V.players[+f.dataset.o]; f.style.width = ((p ? p.army : 0) / tot * 100) + '%'; }
+    this.els.armyL.textContent = me.army;
+    this.els.armyR.textContent = Math.max(0, ...others.map(p => p.army));
+    for (const c of this.els.cards) { const p = V.players[+c.dataset.o]; c.classList.toggle('out', !!p && !p.alive); }
     for (const P of this.els.purr) {
-      const pl = P.side === 'me' ? me : op, v = pl.purr || 0, n = pl.stars;
+      const pl = P.side === 'me' ? me : V.players[+P.side];
+      if (!pl) continue;
+      const v = pl.purr || 0, n = pl.stars;
       if (v === P.v && n === P.n) continue;
       P.stars.forEach((s, k) => { const f = Math.max(0, Math.min(1, (v - k * PURR_PER_STAR) / PURR_PER_STAR)); s.style.setProperty('--f', f.toFixed(2)); s.classList.toggle('on', k < n); });
       P.bonus.textContent = purrBonus(n);
@@ -278,9 +287,10 @@ export class Hud {
       P.e.classList.toggle('max', n >= 5);
       P.v = v; P.n = n;
     }
-    let bm = 0, bo = 0;
-    for (const b of V.buildings) { if (b.owner === this.me) bm++; else if (b.owner === this.opp) bo++; }
-    this.els.bMe.forEach(e => { e.textContent = '🏠 ' + bm; }); this.els.bOpp.textContent = '🏠 ' + bo;
+    const owned = {};
+    for (const b of V.buildings) owned[b.owner] = (owned[b.owner] || 0) + 1;
+    this.els.bMe.forEach(e => { e.textContent = '🏠 ' + (owned[this.me] || 0); });
+    this.els.bOpp.forEach(e => { e.textContent = '🏠 ' + (owned[+e.closest('.pcard').dataset.o] || 0); });
     this.els.catFill.style.width = (me.catnip / MAX_CATNIP * 100) + '%';
     this.els.catTxt.textContent = '🌿 ' + Math.floor(me.catnip);
     const hero = HERO_BY_ID[this.info.players[this.me].hero];
@@ -319,12 +329,16 @@ export class Hud {
         // (portrait phones hide your own card; your emotes pop from the dock instead)
         const card = e.o === me
           ? [...this.root.querySelectorAll('.pcard.me .emote-pop, .mystat .emote-pop')].find(x => x.parentElement.offsetParent !== null)
-          : this.root.querySelector('.pcard.opp .emote-pop');
+          : this.root.querySelector(`.pcard[data-o="${e.o}"] .emote-pop`);
         const em = EMOTES.find(x => x.id === e.id);
         if (card && em) { card.textContent = `${em.icon} ${em.text}`; card.classList.remove('show'); void card.offsetWidth; card.classList.add('show'); }
         break;
       }
-      case 'out': if (e.why === 'surrender') this.toast(`🏳️ ${esc(this.info.players[e.o].name)} surrendered`, 'theirs'); break;
+      case 'out':
+        if (e.o === me) break;
+        if (e.why === 'surrender') this.toast(`🏳️ ${esc(this.info.players[e.o].name)} surrendered`, 'theirs');
+        else if (this.opps.length > 1) this.toast(`💥 <b>${esc(this.info.players[e.o].name)}</b> is out!`, 'theirs', e.o);
+        break;
     }
   }
 
@@ -476,7 +490,7 @@ export class Hud {
   }
   banner(text, kind, why) {
     const b = this.$('.banner');
-    const sub = why === 'surrender' ? 'by surrender' : why === 'disconnect' ? 'opponent disconnected' : why === 'time' ? 'time ran out — biggest army wins' : '';
+    const sub = why === 'out' ? 'you were knocked out' : why === 'surrender' ? 'by surrender' : why === 'disconnect' ? 'opponent disconnected' : why === 'time' ? 'time ran out — biggest army wins' : '';
     b.className = 'banner ' + kind;
     b.innerHTML = `<div class="banner-t">${text}</div>${sub ? `<div class="banner-s">${sub}</div>` : ''}`;
     this.closeBMenu(); this.closeEmotes();

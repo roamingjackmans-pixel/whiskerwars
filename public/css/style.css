@@ -214,6 +214,15 @@ input:focus, select:focus { border-color: var(--pink); }
 .map-svg.rnd { display: grid; place-items: center; font-size: 36px; background: linear-gradient(135deg, #ffd1e3, #c9e9ff); }
 .mc-name { font-weight: 700; font-size: 14px; margin-top: 4px; }
 .mc-size { font-size: 11px; color: var(--ink2); }
+/* lobby seats: you first, then the others */
+.lobby-seats { display: grid; grid-template-columns: 1fr auto 1fr; gap: 14px; align-items: center; margin: 14px 0; }
+.lobby-seats.n3, .lobby-seats.n4 { grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.lobby-seats .pcard-l.mine { box-shadow: 0 6px 0 rgba(0,0,0,.2), 0 0 0 3px #fff inset; }
+.size-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin: 4px 0 10px; font-weight: 600; }
+.res-vs.many { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; }
+.res-vs.many .res-p img { width: 90px; height: 90px; }
+.res-vs.many .res-p.won img { box-shadow: 0 0 0 4px #ffd23d, 0 0 18px rgba(255, 210, 60, .8); border-radius: 50%; }
+.n-seg .btn small { display: block; }
 
 /* ---------- setup / practice ---------- */
 .setup { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
@@ -348,6 +357,15 @@ table.stats td:nth-child(2), table.stats td:nth-child(3), table.stats th { text-
 .hud-top { position: absolute; top: 0; left: 0; right: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: start; gap: 10px; padding: 8px 10px; }
 .pcard { position: relative; display: flex; align-items: center; gap: 10px; background: var(--glass); border-radius: 16px; padding: 5px 14px 5px 5px; border: 3px solid var(--tc); max-width: 330px; backdrop-filter: blur(4px); box-shadow: 0 4px 14px rgba(0,0,0,.3); }
 .pcard.opp { justify-self: end; flex-direction: row-reverse; padding: 5px 5px 5px 14px; text-align: right; }
+/* opponents sit together on the right; with 3-4 players their cards are compact */
+.opps { justify-self: end; display: flex; gap: 8px; align-items: flex-start; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.pcard.mini { padding: 3px 3px 3px 9px; gap: 6px; max-width: 220px; }
+.pcard.mini .portrait { width: 36px; height: 36px; }
+.pcard.mini .pname { font-size: 13px; max-width: 120px; }
+.pcard.mini .phero { display: none; }
+.pcard.mini .purr .pl, .pcard.mini .purr .pb { display: none; }
+.pcard.mini .purr .ps { font-size: 14px; }
+.pcard.out { filter: grayscale(1); opacity: .5; }
 .pcard .portrait { width: 48px; height: 48px; border-radius: 50%; box-shadow: 0 0 0 3px var(--tc); }
 .pname { font-weight: 700; font-size: 16px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
 .pname .tag { font-size: 10px; background: rgba(255,255,255,.2); padding: 1px 5px; border-radius: 5px; vertical-align: 2px; }

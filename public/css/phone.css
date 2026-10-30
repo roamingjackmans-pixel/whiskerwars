@@ -70,7 +70,19 @@
 
 /* ---------- portrait: opponent at the top (like the field), you at the bottom ---------- */
 .hud.phone.portrait .pcard.me { display: none; }
-.hud.phone.portrait .pcard.opp { grid-column: 1; grid-row: 1; justify-self: start; flex-direction: row; padding: 2px 8px 2px 2px; text-align: left; }
+.hud.phone.portrait .opps { grid-column: 1; grid-row: 1; justify-self: start; flex-wrap: nowrap; gap: 4px; }
+.hud.phone.portrait .pcard.opp { flex-direction: row; padding: 2px 8px 2px 2px; text-align: left; }
+/* 3-4 players: the opponents take the whole left of the bar, the timer goes right */
+.hud.phone.portrait .ph-top.many { grid-template-columns: minmax(0, 1fr) auto; }
+.hud.phone.portrait .ph-top.many .hud-center { grid-column: 2; }
+.hud.phone .pcard.mini { padding: 2px 4px 2px 2px; gap: 3px; border-radius: 10px; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.hud.phone .opps.many { min-width: 0; width: 100%; justify-self: stretch !important; gap: 3px; }
+.hud.phone .pcard.mini .pmeta { flex-direction: column !important; align-items: flex-start; gap: 0; line-height: 1; }
+.hud.phone .pcard.mini .portrait { width: 24px; height: 24px; flex-basis: 24px; }
+.hud.phone .pcard.mini .pname { display: none; }
+.hud.phone .pcard.mini .pmeta { gap: 3px; font-size: 9px; }
+.hud.phone .pcard.mini .purr { padding: 0 3px; }
+.hud.phone .pcard.mini .purr .ps { font-size: 7.5px; }
 .hud.phone.portrait .pcard.opp .pmeta { justify-content: flex-start; }
 .hud.phone.portrait .hud-center { grid-column: 2; grid-row: 1; }
 .hud.phone.portrait .ph-dock {
@@ -93,7 +105,7 @@
 
 /* ---------- landscape: send buttons down the left edge, spells down the right edge ---------- */
 .hud.phone.landscape .ph-top { padding-top: calc(env(safe-area-inset-top) + 3px); padding-bottom: 3px; }
-.hud.phone.landscape .pcard.opp { justify-self: end; }
+.hud.phone.landscape .opps { justify-self: end; flex-wrap: nowrap; gap: 4px; }
 .hud.phone.landscape .ph-dock { top: 44px; }
 .hud.phone.landscape .ph-row { position: static; }
 .hud.phone.landscape .pct { position: absolute; left: calc(env(safe-area-inset-left) + 6px); top: calc(50% - 124px); grid-template-columns: 1fr; width: 56px; background: var(--pbg); }

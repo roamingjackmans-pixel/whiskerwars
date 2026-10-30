@@ -1,6 +1,10 @@
 // Whisker Wars networking: two interchangeable transports.
 //  - WSTransport: relay through the included Node server (most reliable)
 //  - P2PTransport: direct WebRTC via PeerJS (works on any static website)
+// A room has a host and up to 3 guests. Guests are numbered by slot (1-3). Events: 'message'(data, fromSlot),
+// 'peer-join'(slot), 'peer-leave'(slot); a guest hears from the host as slot 0. send(data, toSlot?) on the
+// host goes to one guest or, without a slot, to all of them.
+const MAX_GUESTS = 3;
 // Room codes are 5 digits: easy to read out and type on a phone's number pad.
 const CODE_ALPHABET = '0123456789';
 export function genCode(n = 5) {
@@ -66,9 +70,9 @@ export class WSTransport extends Emitter {
   }
   _onMsg(raw) {
     let m; try { m = JSON.parse(raw); } catch { return; }
-    if (m.t === 'msg') this.emit('message', m.d);
-    else if (m.t === 'peer-join') this.emit('peer-join');
-    else if (m.t === 'peer-leave') this.emit('peer-leave');
+    if (m.t === 'msg') this.emit('message', m.d, m.from || 0);
+    else if (m.t === 'peer-join') this.emit('peer-join', m.slot || 1);
+    else if (m.t === 'peer-leave') this.emit('peer-leave', m.slot || 0);
     else if (m.t === 'pong') this.emit('server-pong', m.ts);
     else this.emit('ctl', m);
   }
@@ -92,16 +96,16 @@ export class WSTransport extends Emitter {
   async join(code, pid) {
     await this.connect();
     this.ws.send(JSON.stringify({ t: 'join', code, pid }));
-    await this._await(['joined']);
-    this.code = code; this.isHost = false;
+    const m = await this._await(['joined']);
+    this.code = code; this.isHost = false; this.slot = m.slot || 1;
   }
-  send(d) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify({ t: 'msg', d })); }
+  send(d, to) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(to ? { t: 'msg', d, to } : { t: 'msg', d })); }
   get connected() { return !!this.ws && this.ws.readyState === 1; }
   close() { const ws = this.ws; this.ws = null; if (ws) { try { ws.send(JSON.stringify({ t: 'leave' })); } catch {} try { ws.close(); } catch {} } }
 }
 
 export class P2PTransport extends Emitter {
-  constructor() { super(); this.kind = 'p2p'; this.peer = null; this.conn = null; this.code = null; this.isHost = false; }
+  constructor() { super(); this.kind = 'p2p'; this.peer = null; this.conn = null; this.conns = new Map(); this.code = null; this.isHost = false; }
   _peerOpts() {
     const o = { debug: 1 };
     const ice = cfg().iceServers;
@@ -119,10 +123,18 @@ export class P2PTransport extends Emitter {
       peer.on('error', err => { clearTimeout(timer); reject(err); });
     });
   }
+  /** guest: the one connection to the host */
   _wire(conn) {
     this.conn = conn;
-    conn.on('data', d => this.emit('message', d));
-    conn.on('close', () => { if (this.conn === conn) { this.conn = null; this.emit('peer-leave'); } });
+    conn.on('data', d => this.emit('message', d, 0));
+    conn.on('close', () => { if (this.conn === conn) { this.conn = null; this.emit('peer-leave', 0); } });
+    conn.on('error', () => {});
+  }
+  /** host: one connection per guest slot */
+  _wireGuest(conn, slot) {
+    this.conns.set(slot, conn);
+    conn.on('data', d => { if (this.conns.get(slot) === conn) this.emit('message', d, slot); });
+    conn.on('close', () => { if (this.conns.get(slot) === conn) { this.conns.delete(slot); this.emit('peer-leave', slot); } });
     conn.on('error', () => {});
   }
   async host() {
@@ -134,10 +146,14 @@ export class P2PTransport extends Emitter {
         this.peer = await this._newPeer(prefix + code);
         this.code = code; this.isHost = true;
         this.peer.on('connection', conn => {
-          const same = this.conn && conn.metadata && this.conn.metadata && conn.metadata.pid && conn.metadata.pid === this.conn.metadata.pid;
-          if (this.conn && this.conn.open && !same) { conn.on('open', () => { conn.send({ type: 'full' }); setTimeout(() => conn.close(), 300); }); return; }
-          if (same) { const old = this.conn; this.conn = null; try { old.close(); } catch {} }
-          conn.on('open', () => { this._wire(conn); this.emit('peer-join'); });
+          // the same player reconnecting takes back their slot; otherwise the next free one (up to 3 guests)
+          const pid = conn.metadata && conn.metadata.pid;
+          let slot = 0;
+          for (const [s, c] of this.conns) if (pid && c.metadata && c.metadata.pid === pid) { slot = s; this.conns.delete(s); try { c.close(); } catch {} }
+          if (!slot) for (let s = 1; s <= MAX_GUESTS && !slot; s++) if (!this.conns.has(s) || !this.conns.get(s).open) slot = s;
+          if (!slot) { conn.on('open', () => { conn.send({ type: 'full' }); setTimeout(() => conn.close(), 300); }); return; }
+          this.conns.set(slot, conn);
+          conn.on('open', () => { this._wireGuest(conn, slot); this.emit('peer-join', slot); });
         });
         this.peer.on('disconnected', () => { try { this.peer && !this.peer.destroyed && this.peer.reconnect(); } catch {} });
         this.peer.on('error', e => console.warn('peer error', e && e.type));
@@ -169,12 +185,17 @@ export class P2PTransport extends Emitter {
     });
     this.code = code; this.isHost = false;
   }
-  send(d) { if (this.conn && this.conn.open) { try { this.conn.send(d); } catch (e) { console.warn(e); } } }
-  get connected() { return !!this.conn && this.conn.open; }
+  send(d, to) {
+    const out = c => { if (c && c.open) { try { c.send(d); } catch (e) { console.warn(e); } } };
+    if (!this.isHost) return out(this.conn);
+    if (to) out(this.conns.get(to)); else for (const c of this.conns.values()) out(c);
+  }
+  get connected() { return this.isHost ? [...this.conns.values()].some(c => c.open) : !!this.conn && this.conn.open; }
   close() {
     try { this.conn && this.conn.close(); } catch {}
+    for (const c of this.conns.values()) { try { c.close(); } catch {} }
     try { this.peer && this.peer.destroy(); } catch {}
-    this.conn = null; this.peer = null;
+    this.conn = null; this.conns.clear(); this.peer = null;
   }
 }
 

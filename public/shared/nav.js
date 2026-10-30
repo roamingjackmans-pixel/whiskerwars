@@ -148,7 +148,9 @@ const DIRS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], 
 // ---------------- the nav mesh ----------------
 export class Nav {
   /** buildings: [{id, x, y, r? | type+level}], obstacles: raw map obstacles */
-  constructor(buildings, obstacles) {
+  /** opts.rot3: [cx, cy] for 3-player maps that repeat three times around that point */
+  constructor(buildings, obstacles, opts = {}) {
+    this.rot3 = Array.isArray(opts.rot3) ? opts.rot3 : null;
     this.shapes = normalizeObstacles(obstacles);
     this.hasTerrain = this.shapes.length > 0;
     this.blockTest = makeBlockTest(this.shapes);
@@ -177,17 +179,22 @@ export class Nav {
     this.lens = new Float64Array(n * n);
     this.unreachable = 0;
     // on a point-symmetric map, P1's road between two buildings is P0's road turned around the centre: fair to the pixel
-    const mir = this.symmetry();
-    for (let a = 0; a < n; a++) for (let b = a + 1; b < n; b++) {
-      if (mir && mir[a] >= 0 && mir[b] >= 0) {
+    // (4-player maps are also mirrored left/right and top/bottom, so every corner gets the same roads)
+    const syms = this.symmetries();
+    for (let a = 0; a < n; a++) pairs: for (let b = a + 1; b < n; b++) {
+      for (const { map: mir, inv, exact } of syms) {
+        if (mir[a] < 0 || mir[b] < 0) continue;
         const ma = mir[a], mb = mir[b], twin = this.full && this.full[ma * n + mb];
-        if (twin && !(ma === a && mb === b)) {
-          const turned = twin.map(p => ({ x: WORLD_W - p.x, y: WORLD_H - p.y }));
-          // (a short step the original took without a clear line of sight is fine for the copy too)
-          let ok = true;
+        if (!twin || (ma === a && mb === b) || (ma === b && mb === a)) continue;
+        // twin is the road between the images of a and b; carry it back onto a and b
+        const turned = twin.map(inv);
+        let ok = true;
+        if (exact) {
+          // mirrored on the same grid: the copy must pass the same line-of-sight test (a short step the original
+          // took without a clear line of sight is fine for the copy too)
           for (let k = 1; k < turned.length && ok; k++) ok = this.los(turned[k - 1], turned[k], a, b) || !this.los(twin[k - 1], twin[k], ma, mb);
-          if (ok) { this.setRoute(a, b, turned); continue; }
-        }
+        } else ok = this.clearOfTerrain(turned);   // turned by 120°: check against the real obstacle shapes
+        if (ok) { this.setRoute(a, b, turned); continue pairs; }
       }
       const full = this.route(a, b);
       if (!full) {
@@ -198,11 +205,49 @@ export class Nav {
     }
   }
 
-  /** For point-symmetric terrain: building index -> its mirror's index (-1 if it has none). Otherwise null. */
-  symmetry() {
-    const N = NAV_COLS * NAV_ROWS;
-    for (let c = 0; c < N; c++) if (this.blocked[c] !== this.blocked[N - 1 - c]) return null;
-    return this.B.map(b => this.B.findIndex(o => Math.abs(o.x - (WORLD_W - b.x)) < 0.01 && Math.abs(o.y - (WORLD_H - b.y)) < 0.01 && Math.abs(o.r - b.r) < 0.01));
+  /**
+   * The map's symmetries (turned around the centre, mirrored left/right, mirrored top/bottom) that the terrain
+   * really has: each with how to move a point and which building lands on which (-1 where none does).
+   */
+  symmetries() {
+    const C = NAV_COLS, R = NAV_ROWS, out = [];
+    const kinds = [
+      { cell: (i, j) => (R - 1 - j) * C + (C - 1 - i), f: p => ({ x: WORLD_W - p.x, y: WORLD_H - p.y }) },
+      { cell: (i, j) => j * C + (C - 1 - i), f: p => ({ x: WORLD_W - p.x, y: p.y }) },
+      { cell: (i, j) => (R - 1 - j) * C + i, f: p => ({ x: p.x, y: WORLD_H - p.y }) },
+    ];
+    for (const k of kinds) {
+      let same = true;
+      for (let j = 0; j < R && same; j++) for (let i = 0; i < C; i++) if (this.blocked[j * C + i] !== this.blocked[k.cell(i, j)]) { same = false; break; }
+      if (!same) continue;
+      const map = this.B.map(b => { const q = k.f(b); return this.B.findIndex(o => Math.abs(o.x - q.x) < 0.01 && Math.abs(o.y - q.y) < 0.01 && Math.abs(o.r - b.r) < 0.01); });
+      if (map.some(m => m >= 0)) out.push({ map, f: k.f, inv: k.f, exact: true });
+    }
+    // 3-player maps: the layout repeats every 120° around rot3, so one seat's roads, turned, serve the others
+    if (this.rot3) {
+      const [cx, cy] = this.rot3;
+      const turnBy = k => { const a = k * 2 * Math.PI / 3, c = Math.cos(a), s = Math.sin(a); return p => ({ x: cx + (p.x - cx) * c - (p.y - cy) * s, y: cy + (p.x - cx) * s + (p.y - cy) * c }); };
+      for (const k of [1, 2]) {
+        const f = turnBy(k), inv = turnBy(3 - k);
+        const map = this.B.map(b => { const q = f(b); return this.B.findIndex(o => Math.abs(o.x - q.x) < 1.5 && Math.abs(o.y - q.y) < 1.5 && Math.abs(o.r - b.r) < 0.01); });
+        if (map.some(m => m >= 0)) out.push({ map, f, inv, exact: false });
+      }
+    }
+    return out;
+  }
+  /** Does this route keep clear of water and walls (a little closer than the grid allows is fine)? */
+  clearOfTerrain(pts) {
+    const m = CLEARANCE * 0.3;
+    for (let k = 1; k < pts.length; k++) {
+      const p = pts[k - 1], q = pts[k], L = Math.sqrt((q.x - p.x) ** 2 + (q.y - p.y) ** 2), steps = Math.max(1, Math.ceil(L / 5));
+      for (let s = 0; s <= steps; s++) {
+        const x = p.x + (q.x - p.x) * s / steps, y = p.y + (q.y - p.y) * s / steps;
+        if (x < EDGE * 0.5 || y < EDGE * 0.5 || x > WORLD_W - EDGE * 0.5 || y > WORLD_H - EDGE * 0.5) return false;
+        // the start and end are building centres, which always stand on open ground
+        if (k > 1 || s > 0) if (k < pts.length - 1 || s < steps) if (this.blockTest(x, y, m)) return false;
+      }
+    }
+    return true;
   }
   setRoute(a, b, full) {
     const n = this.B.length, L = polyLen(full);
@@ -354,10 +399,10 @@ export function polyLen(pts) {
 const cache = new Map();
 export function getNav(map) {
   const buildings = (map.buildings || []).map(b => ({ id: b.id, x: b.x, y: b.y, r: navRadius(b) }));
-  const key = JSON.stringify([buildings.map(b => [b.id, b.x, b.y, b.r]), map.obstacles || []]);
+  const key = JSON.stringify([buildings.map(b => [b.id, b.x, b.y, b.r]), map.obstacles || [], map.rot3 || 0]);
   let nav = cache.get(key);
   if (nav) { cache.delete(key); cache.set(key, nav); return nav; }
-  nav = new Nav(buildings, map.obstacles || []);
+  nav = new Nav(buildings, map.obstacles || [], { rot3: map.rot3 });
   cache.set(key, nav);
   if (cache.size > 12) cache.delete(cache.keys().next().value);
   return nav;

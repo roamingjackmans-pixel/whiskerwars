@@ -26,7 +26,7 @@ let canvas, screens, hudRoot, modalRoot, toastRoot;
 let attract = null, match = null, session = null;
 let sentInvite = null;   // the friend invite for the room you are hosting, if any
 let current = null;
-const state = { practice: { map: 'meadow', ai: 'normal', enemy: 'random', rules: {} }, lastCampaign: null };
+const state = { practice: { map: 'meadow', ai: 'normal', enemy: 'random', rules: {}, players: 2 }, lastCampaign: null };
 
 function rulesRow(rules, readonly) {
   return `<div class="rules-row"><div class="rules-l">Fun modifiers${readonly ? ' <span class="muted small">(host picks)</span>' : ''}:</div>${RULES.map(r => `<button class="btn small rule-btn ${rules[r.id] ? 'on' : ''}" data-rule="${r.id}" title="${r.desc}" ${readonly ? 'disabled' : ''}>${r.icon} ${r.name}<small>${r.desc}</small></button>`).join('')}</div>`;
@@ -100,12 +100,13 @@ function startAttract() {
   if (attract || match) return;
   const heroes = HEROES.map(h => h.id);
   const pick = () => heroes[Math.floor(Math.random() * heroes.length)];
-  const map = Math.random() < 0.5 ? randomMap((Math.random() * 1e6) | 0) : structuredClone(MAPS[Math.floor(Math.random() * MAPS.length)]);
+  const map = Math.random() < 0.35 ? randomMap((Math.random() * 1e6) | 0) : structuredClone(MAPS[Math.floor(Math.random() * MAPS.length)]);
+  const seats = map.players || 2;
   const furs = FURS.map(f => f.id), hats = HATS.map(h => h.id);
   const r = a => a[Math.floor(Math.random() * a.length)];
   attract = new Match(canvas, hudRoot, {
     mode: 'attract', role: 'local', me: -1, fxLevel: 'medium',
-    cfg: { map, seed: (Math.random() * 1e9) | 0, timeLimit: 400, players: [{ name: 'A', hero: pick(), fur: r(furs), hat: r(hats), ai: 'normal' }, { name: 'B', hero: pick(), fur: r(furs), hat: r(hats), ai: 'normal' }] },
+    cfg: { map, seed: (Math.random() * 1e9) | 0, timeLimit: 400, players: Array.from({ length: seats }, (_, i) => ({ name: 'ABCD'[i], hero: pick(), fur: r(furs), hat: r(hats), ai: 'normal' })) },
     onEnd: () => { stopAttract(); if (!match) startAttract(); },
   });
   attract.start(0);
@@ -307,8 +308,14 @@ function mapPreview(m) {
   }).join('');
   return `<svg viewBox="0 0 160 90" class="map-svg"><rect width="160" height="90" rx="8" fill="${th.ground}"/><rect x="4" y="4" width="152" height="82" rx="6" fill="${th.ground2}" opacity=".5"/>${terrain}${dots}</svg>`;
 }
+/** maps for this many players (random maps are 2-player only) */
+function mapsFor(n) {
+  const list = MAPS.filter(m => (m.players || 2) === n);
+  return n === 2 ? [...list, { id: 'random', name: 'Random Map', theme: 'meadow', size: '???', desc: 'A brand new battlefield every time.', buildings: [] }] : list;
+}
+const mapPlayers = id => (id === 'random' ? 2 : (MAP_BY_ID[id] && MAP_BY_ID[id].players) || 2);
 function mapPicker(root, selected, onPick, opts = {}) {
-  const maps = [...MAPS, { id: 'random', name: 'Random Map', theme: 'meadow', size: '???', desc: 'A brand new battlefield every time.', buildings: [] }];
+  const maps = mapsFor(opts.players || 2);
   const draw = () => {
     root.innerHTML = `<div class="map-grid">${maps.map(m => `<div class="map-card card ${opts.readonly ? '' : 'clickable'} ${m.id === selected ? 'sel' : ''}" data-map="${m.id}">
       ${m.id === 'random' ? '<div class="map-svg rnd">🎲</div>' : mapPreview(m)}
@@ -522,14 +529,12 @@ SCREENS.lobby = () => {
         </div>
         <div class="room-mode muted small">${S.kind === 'server' ? 'via game server' : 'peer-to-peer'}</div>
       </div>
-      <div class="vs-row">
-        <div class="pslot me-slot"></div>
-        <div class="vs">VS</div>
-        <div class="pslot opp-slot"></div>
-      </div>
+      <div class="lobby-seats"></div>
       <div class="lobby-cols">
         <div class="card panel"><h3>Choose your hero</h3><div class="lobby-heroes"></div><div class="lobby-hero-detail"></div></div>
-        <div class="card panel"><h3>Battlefield ${S.isHost ? '' : '<span class="muted small">(host picks)</span>'}</h3><div class="lobby-maps"></div>
+        <div class="card panel"><h3>Battlefield ${S.isHost ? '' : '<span class="muted small">(host picks)</span>'}</h3>
+          <div class="size-row">Players: ${[2, 3, 4].map(n => `<button class="btn small size-btn" data-n="${n}" ${S.isHost ? '' : 'disabled'}>${'🐱'.repeat(n)} ${n}</button>`).join('')}</div>
+          <div class="lobby-maps"></div>
           <div class="time-row">Time limit: ${[300, 480, 600, 900].map(t => `<button class="btn small time-btn" data-t="${t}" ${S.isHost ? '' : 'disabled'}>${t / 60} min</button>`).join('')}</div>
           <div class="lobby-rules"></div>
           <div class="lobby-emotes">${EMOTES.map(e => `<button class="btn small lem" data-e="${e.id}" title="${e.text}">${e.icon}</button>`).join('')}</div>
@@ -550,15 +555,22 @@ SCREENS.lobby = () => {
   const drawDetail = () => { $('.lobby-hero-detail').innerHTML = heroDetail(HERO_BY_ID[myHero]); };
   heroPicker($('.lobby-heroes'), myHero, id => { myHero = id; P.equip('hero', id); S.setPick({ hero: id }); if (S.lobby.ready[S.me]) S.setReady(false); drawDetail(); });
   drawDetail();
-  let lastMap = null;
-  const drawMaps = () => mapPicker($('.lobby-maps'), S.lobby.map, id => S.setMap(id), { readonly: !S.isHost });
+  let lastMap = null, lastSize = 0;
+  // only maps made for the lobby's number of players
+  const drawMaps = () => mapPicker($('.lobby-maps'), S.lobby.map, id => S.setMap(id), { readonly: !S.isHost, players: S.lobby.size || 2 });
   $$('.time-btn').forEach(b => b.onclick = () => S.setTime(+b.dataset.t));
+  $$('.size-btn').forEach(b => b.onclick = () => {
+    const n = +b.dataset.n;
+    if (n === S.lobby.size) return;
+    const map = mapPlayers(S.lobby.map) === n ? S.lobby.map : mapsFor(n)[0].id;
+    if (!S.setSize(n, map)) { audio.play('error'); toast(`${S.joined()} players are already here`, 'warn'); }
+  });
   $$('.lem').forEach(b => b.onclick = () => { S.lobbyEmote(b.dataset.e); showLobbyEmote(S.me, b.dataset.e); audio.play('emote'); });
 
   const slot = (pl, i, ready) => {
-    if (!pl) return `<div class="pcard-l empty"><div class="waiting-cat">🐾</div><div>Waiting for a friend...</div><div class="muted small">Send them the code <b>${S.code}</b></div></div>`;
+    if (!pl) return `<div class="pcard-l empty" data-seat="${i}"><div class="waiting-cat">🐾</div><div>Waiting for a friend...</div><div class="muted small">Send them the code <b>${S.code}</b></div></div>`;
     const h = HERO_BY_ID[pl.hero] || HEROES[0];
-    return `<div class="pcard-l" style="--tc:${teamColor(i).main}">
+    return `<div class="pcard-l${i === S.me ? ' mine' : ''}" data-seat="${i}" style="--tc:${teamColor(i).main}">
       <img class="pl-hero" src="${portrait(h.id, 120)}" alt="">
       <div class="pl-info"><div class="pl-name">${esc(pl.name)} <span class="pill tiny">Lv ${pl.level}</span></div><div class="pl-hero-n">${h.name}</div>
       <div class="pl-cat"><img src="${catImg(pl.fur, pl.hat, 64, i)}" alt=""></div></div>
@@ -568,32 +580,37 @@ SCREENS.lobby = () => {
     </div>`;
   };
   const showLobbyEmote = (i, id) => {
-    const el = $(i === S.me ? '.me-slot .lemote-pop' : '.opp-slot .lemote-pop');
+    const el = $(`.lobby-seats [data-seat="${i}"] .lemote-pop`);
     const em = EMOTES.find(x => x.id === id);
     if (el && em) { el.textContent = `${em.icon} ${em.text}`; el.classList.remove('show'); void el.offsetWidth; el.classList.add('show'); }
   };
   const render = () => {
     const L = S.lobby;
-    const me = S.me, op = 1 - me;
-    $('.me-slot').innerHTML = slot(L.players[me], me, L.ready[me]);
-    $('.opp-slot').innerHTML = slot(L.players[op], op, L.ready[op]);
-    const addBtn = $('.opp-slot .pl-add');
-    if (addBtn) addBtn.onclick = () => {
-      const o = S.lobby.players[op];
+    const me = S.me, size = L.size || 2;
+    // you first, then everyone else in seat order (each seat has its team colour)
+    const seats = [me, ...Array.from({ length: size }, (_, k) => k).filter(k => k !== me)];
+    const box = $('.lobby-seats');
+    box.className = 'lobby-seats n' + size;
+    box.innerHTML = seats.map((k, n) => (n === 1 && size === 2 ? '<div class="vs">VS</div>' : '') + slot(L.players[k], k, L.ready[k])).join('');
+    $$('.lobby-seats .pl-add').forEach(btn => btn.onclick = () => {
+      const o = S.lobby.players[+btn.closest('[data-seat]').dataset.seat];
       const r = addFriend(o.fc, o.name);
       toast(r.ok ? `😺 <b>${esc(o.name)}</b> is now your friend. Invite them any time from Battle a Friend!` : r.msg, r.ok ? 'good' : 'warn');
       render();
-    };
-    if (L.map !== lastMap) { lastMap = L.map; drawMaps(); }
+    });
+    $$('.size-btn').forEach(b => b.classList.toggle('on', +b.dataset.n === size));
+    if (L.map !== lastMap || size !== lastSize) { lastMap = L.map; lastSize = size; drawMaps(); }
     $$('.time-btn').forEach(b => b.classList.toggle('on', +b.dataset.t === L.time));
     $('.lobby-rules').innerHTML = rulesRow(L.rules || {}, !S.isHost);
     if (S.isHost) $$('.rule-btn').forEach(b => b.onclick = () => S.toggleRule(b.dataset.rule));
     const rb = $('.ready-btn'), st = $('.lobby-status');
-    const oppHere = !!L.players[op];
+    const here = S.joined(), readyN = L.ready.slice(1, size).filter(Boolean).length;
     if (S.isHost) {
       rb.textContent = '⚔️ Start Battle!';
       rb.classList.toggle('off', !S.canStart());
-      st.innerHTML = !oppHere ? 'Waiting for your friend to join...' : L.ready[1] ? '<b>Your friend is ready!</b> Start when you are.' : 'Waiting for your friend to press Ready...';
+      st.innerHTML = size === 2
+        ? (here < 2 ? 'Waiting for your friend to join...' : L.ready[1] ? '<b>Your friend is ready!</b> Start when you are.' : 'Waiting for your friend to press Ready...')
+        : (here < size ? `<b>${here} of ${size}</b> players here. Send the code to your friends!` : readyN < size - 1 ? `${readyN} of ${size - 1} friends ready...` : '<b>Everyone is ready!</b> Start when you are.');
     } else {
       rb.textContent = L.ready[me] ? '✔ Ready! (tap to cancel)' : '👍 I\'m Ready!';
       rb.classList.toggle('on', !!L.ready[me]);
@@ -602,18 +619,18 @@ SCREENS.lobby = () => {
   };
   $('.ready-btn').onclick = () => {
     if (S.isHost) {
-      if (!S.canStart()) { audio.play('error'); toast(S.lobby.players[1] ? 'Your friend is not ready yet' : 'No friend in the room yet — send them the code!', 'warn'); return; }
+      if (!S.canStart()) { audio.play('error'); toast(S.joined() < (S.lobby.size || 2) ? 'Not everyone is here yet — send them the code!' : 'Not everyone is ready yet', 'warn'); return; }
       startOnline();
     } else S.setReady(!S.lobby.ready[S.me]);
   };
   const offs = [
     S.on('lobby', render),
     S.on('guest-hello', pl => { toast(`😺 <b>${esc(pl.name)}</b> joined the room!`, 'good'); audio.play('meow'); }),
-    S.on('peer-leave', () => { toast('😿 Your friend left the room', 'warn'); }),
+    S.on('peer-leave', () => { toast('😿 A friend left the room', 'warn'); }),
     S.on('lemote', (id, from) => { showLobbyEmote(from, id); audio.play('emote'); }),
     S.on('start', m => startGuest(m)),
     S.on('disconnected', () => { toast('😿 Lost connection to the room', 'warn'); endSession(); go('friend'); }),
-    S.on('error', e => toast('😿 ' + esc(e.message), 'warn')),
+    S.on('error', e => { toast('😿 ' + esc(e.message), 'warn'); if (/full/i.test(e.message)) { endSession(); go('friend'); } }),
   ];
   render();
   return { leave: () => offs.forEach(f => f()) };
@@ -624,7 +641,7 @@ function startOnline() {
   const L = S.lobby;
   const cfg = {
     map: resolveMap(L.map, L.seed), seed: L.seed, timeLimit: L.time, rules: L.rules || {},
-    players: L.players.map(pl => ({ name: pl.name, hero: pl.hero, fur: pl.fur, hat: pl.hat })),
+    players: L.players.slice(0, L.size || 2).map(pl => ({ name: pl.name, hero: pl.hero, fur: pl.fur, hat: pl.hat })),
   };
   S.markMatch();
   const m = beginMatch({
@@ -637,39 +654,59 @@ function startOnline() {
 }
 function startGuest(msg) {
   const S = session;
-  const m = beginMatch({ mode: 'online', role: 'guest', me: 1, info: msg.info, firstSnap: msg.snap, send: x => S.send(x), getPing: () => S.ping });
+  const m = beginMatch({ mode: 'online', role: 'guest', me: S.me, info: msg.info, firstSnap: msg.snap, send: x => S.send(x), getPing: () => S.ping });
   wireSessionToMatch(m);
 }
 function wireSessionToMatch(m) {
   const S = session;
   S.inMatch = true;
   const GRACE = 20;
-  let timer = null, left = 0;
+  let timer = null;
   const offs = [S.on('snap', s => m.pushRemoteSnap(s))];
   if (S.isHost) {
-    // host: pause and wait for the guest to come back
-    const lost = () => {
-      if (m.over || timer) return;
+    // host: pause and wait for a dropped player to come back. 2 players: if they don't, you win.
+    // 3-4 players: if they don't, they're out (their buildings go stray) and the battle carries on.
+    const waits = new Map();   // seat -> seconds left
+    const many = (m.info.players || []).length > 2;
+    const show = () => {
+      if (!waits.size) { m.hud && m.hud.waiting(null); return; }
+      const names = [...waits.keys()].map(k => esc((m.info.players[k] || {}).name || 'A player')).join(', ');
+      const left = Math.max(...waits.values());
+      m.hud && m.hud.waiting(`${names} lost connection...<br>Waiting <b>${left}s</b> for them to come back`);
+    };
+    const tick = () => {
+      timer = null;
+      if (m.over) return;
+      for (const [k, s] of [...waits]) {
+        if (s > 0) { waits.set(k, s - 1); continue; }
+        waits.delete(k);
+        if (!many) { m.hud && m.hud.waiting(null); m.netPause(false); m.forceEnd(S.me, 'disconnect'); return; }
+        if (m.game && !m.game.over) m.game.eliminate(k, 'disconnect');
+      }
+      show();
+      if (waits.size) timer = setTimeout(tick, 1000); else m.netPause(false);
+    };
+    const lost = seat => {
+      if (m.over || seat == null || waits.has(seat) || !m.game || !(m.game.players[seat] || {}).alive) return;
+      waits.set(seat, GRACE);
       m.netPause(true);
-      left = GRACE;
-      const tick = () => {
-        if (m.over) return;
-        m.hud && m.hud.waiting('Your opponent lost connection...<br>Waiting <b>' + left + 's</b> for them to come back');
-        if (left-- <= 0) { timer = null; m.hud && m.hud.waiting(null); m.netPause(false); m.forceEnd(S.me, 'disconnect'); return; }
-        timer = setTimeout(tick, 1000);
-      };
-      tick();
+      show();
+      if (!timer) timer = setTimeout(tick, 1000);
     };
     offs.push(
-      S.on('cmd', c => m.remoteCommand(c, 1)),
+      S.on('cmd', (c, seat) => m.remoteCommand(c, seat)),
       S.on('peer-leave', lost),
-      S.on('guest-resume', () => {
+      S.on('guest-resume', (seat, slot) => {
         if (m.over) return;
-        clearTimeout(timer); timer = null;
-        S.send({ type: 'start', info: m.info, snap: m.currentSnap(), resume: true });
-        m.hud && m.hud.waiting('Opponent is back! Resuming...');
-        setTimeout(() => { m.hud && m.hud.waiting(null); m.netPause(false); }, 1500);
-        toast('😺 Your opponent reconnected!', 'good');
+        S.send({ type: 'start', info: m.info, snap: m.currentSnap(), resume: true }, slot);
+        if (!waits.has(seat)) return;
+        waits.delete(seat);
+        toast(`😺 ${esc((m.info.players[seat] || {}).name || 'Your friend')} reconnected!`, 'good');
+        if (!waits.size) {
+          clearTimeout(timer); timer = null;
+          m.hud && m.hud.waiting('Everyone is back! Resuming...');
+          setTimeout(() => { if (!waits.size) { m.hud && m.hud.waiting(null); m.netPause(false); } }, 1500);
+        } else show();
       }),
       S.on('disconnected', () => { if (!m.over) m.forceEnd(-1, 'disconnect'); }),
     );
@@ -737,38 +774,43 @@ function onMatchEnd(m, opts, res) {
   const me = res.me;
   const st = res.stats ? res.stats[me] : {};
   const info = res.info;
-  const opp = info.players[1 - me];
+  const opponent = info.players.filter((_, i) => i !== me).map(p => p.name).join(', ');
   const reward = P.recordMatch({
     mode: opts.mode, win: res.win, draw: res.draw, why: res.why, ai: opts.aiLevel, stats: st || {}, time: res.time,
-    opponent: opp.name, hero: info.players[me].hero, map: info.map.name, level: opts.level,
+    opponent, hero: info.players[me].hero, map: info.map.name, level: opts.level,
   });
   go('results', { res, opts, reward });
 }
 
 // ---------- Results
 SCREENS.results = ({ res, opts, reward }) => {
-  const info = res.info, me = res.me, opp = 1 - me;
+  const info = res.info, me = res.me;
+  const others = info.players.map((_, i) => i).filter(i => i !== me), opp = others[0];
   const mine = info.players[me], theirs = info.players[opp];
+  const many = others.length > 1;
   const S = res.stats || [];
-  const row = (label, key) => `<tr><td>${label}</td><td>${S[me] ? S[me][key] : '-'}</td><td>${S[opp] ? S[opp][key] : '-'}</td></tr>`;
+  const cols = [me, ...others];
+  const row = (label, key) => `<tr><td>${label}</td>${cols.map(i => `<td>${S[i] ? S[i][key] : '-'}</td>`).join('')}</tr>`;
+  const head = `<tr><th></th>${cols.map(i => `<th>${i === me ? 'You' : many ? esc(info.players[i].name.split(' ')[0]) : 'Them'}</th>`).join('')}</tr>`;
   const p = P.profile();
   const nh = reward.nextHero;
   const isCampaign = opts.mode === 'campaign';
   const nextLevel = isCampaign ? CAMPAIGN.find(l => l.id === opts.level.id + 1) : null;
   screens.innerHTML = `<div class="results ${res.win ? 'win' : res.draw ? 'draw' : 'lose'}">
     <div class="res-banner">${res.win ? '🏆 VICTORY!' : res.draw ? '🤝 DRAW' : '😿 DEFEAT'}</div>
-    <div class="res-sub">${res.why === 'surrender' ? (res.win ? 'Your opponent surrendered' : 'You surrendered') : res.why === 'disconnect' ? 'Opponent disconnected' : res.why === 'time' ? 'Time ran out: the biggest army wins' : res.win ? 'You conquered every building!' : 'Your clowder has been scattered...'}
+    <div class="res-sub">${res.why === 'out' ? 'You were knocked out' : res.why === 'surrender' ? (res.win ? (many ? 'The last of your rivals surrendered' : 'Your opponent surrendered') : 'You surrendered') : res.why === 'disconnect' ? 'Opponent disconnected' : res.why === 'time' ? 'Time ran out: the biggest army wins' : res.win ? 'You conquered every building!' : many && res.winner >= 0 ? `${esc(info.players[res.winner].name)} took the kingdom` : 'Your clowder has been scattered...'}
       · ${Math.floor(res.time / 60)}:${String(res.time % 60).padStart(2, '0')}</div>
     ${isCampaign && res.win ? `<div class="res-stars">${[1, 2, 3].map(k => `<span class="${k <= reward.stars ? 'on' : ''}">★</span>`).join('')}</div>` : ''}
-    <div class="res-vs">
+    ${many ? `<div class="res-vs many">${cols.map(i => `<div class="res-p ${i === res.winner ? 'won' : ''}"><img src="${portrait(info.players[i].hero, 110)}"><div>${i === res.winner ? '👑 ' : ''}${esc(info.players[i].name)}${i === me ? ' (you)' : ''}</div></div>`).join('')}</div>`
+      : `<div class="res-vs">
       <div class="res-p"><img src="${portrait(mine.hero, 140)}"><div>${esc(mine.name)}</div></div>
       <div class="vs">VS</div>
       <div class="res-p"><img src="${portrait(theirs.hero, 140)}"><div>${esc(theirs.name)}</div></div>
-    </div>
+    </div>`}
     <div class="res-cols">
       <div class="card panel">
         <h3>Battle stats</h3>
-        <table class="stats"><tr><th></th><th>You</th><th>Them</th></tr>
+        <table class="stats">${head}
           ${row('🐱 Kittens made', 'produced')}${row('🏠 Buildings captured', 'captured')}${row('💥 Cats knocked out', 'killed')}
           ${row('✨ Spells cast', 'spells')}${row('📈 Biggest army', 'peakArmy')}${row('⬆ Upgrades', 'upgrades')}
         </table>
@@ -827,7 +869,9 @@ SCREENS.practice = () => {
     <div class="setup">
       <div class="card panel"><h3>Your hero</h3><div class="pr-heroes"></div><div class="pr-detail"></div></div>
       <div class="card panel">
-        <h3>Opponent</h3>
+        <h3>Players</h3>
+        <div class="seg n-seg">${[2, 3, 4].map(n => `<button class="btn small ${(sp.players || 2) === n ? 'on' : ''}" data-n="${n}">${'🐱'.repeat(n)}<small>${n} players</small></button>`).join('')}</div>
+        <h3>Opponent<span class="opp-n muted small"></span></h3>
         <div class="seg ai-seg">${Object.entries(AI_LEVELS).map(([k, v]) => `<button class="btn small ${sp.ai === k ? 'on' : ''}" data-ai="${k}">${v.name}<small>${k}</small></button>`).join('')}</div>
         <div class="row"><label>Enemy hero:</label><select class="enemy-sel"><option value="random">🎲 Random</option>${HEROES.map(h => `<option value="${h.id}" ${sp.enemy === h.id ? 'selected' : ''}>${h.name}</option>`).join('')}</select></div>
         <h3>Battlefield</h3><div class="pr-maps"></div>
@@ -840,7 +884,14 @@ SCREENS.practice = () => {
   const det = () => $('.pr-detail').innerHTML = heroDetail(HERO_BY_ID[hero]);
   heroPicker($('.pr-heroes'), hero, id => { hero = id; P.equip('hero', id); det(); });
   det();
-  mapPicker($('.pr-maps'), sp.map, id => { sp.map = id; });
+  const drawMaps = () => {
+    const n = sp.players || 2;
+    if (mapPlayers(sp.map) !== n) sp.map = mapsFor(n)[0].id;
+    mapPicker($('.pr-maps'), sp.map, id => { sp.map = id; }, { players: n });
+    $('.opp-n').textContent = n > 2 ? ` · ${n - 1} computer cats (the rest get random heroes)` : '';
+  };
+  drawMaps();
+  $$('[data-n]').forEach(b => b.onclick = () => { sp.players = +b.dataset.n; $$('[data-n]').forEach(x => x.classList.toggle('on', x === b)); drawMaps(); });
   $$('[data-ai]').forEach(b => b.onclick = () => { sp.ai = b.dataset.ai; $$('[data-ai]').forEach(x => x.classList.toggle('on', x === b)); });
   $('.enemy-sel').onchange = ev => { sp.enemy = ev.target.value; };
   const drawRules = () => { $('.pr-rules').innerHTML = rulesRow(sp.rules, false); $$('.pr-rules .rule-btn').forEach(b => b.onclick = () => { sp.rules = { ...sp.rules, [b.dataset.rule]: !sp.rules[b.dataset.rule] }; drawRules(); }); };
@@ -851,17 +902,19 @@ function aiName() { return ['Sir Hiss-a-lot', 'Lady Scratchington', 'Baron Von F
 function playPractice() {
   const p = P.profile();
   const sp = state.practice;
-  const enemy = sp.enemy === 'random' ? HEROES[Math.floor(Math.random() * HEROES.length)].id : sp.enemy;
+  const n = mapPlayers(sp.map);
   const seed = (Math.random() * 1e9) | 0;
-  const furs = FURS.map(f => f.id), hats = HATS.map(h => h.id);
+  const hats = HATS.map(h => h.id);
+  const names = [...new Set(Array.from({ length: 20 }, aiName))];
+  const foes = Array.from({ length: n - 1 }, (_, k) => {
+    const hero = k === 0 && sp.enemy !== 'random' ? sp.enemy : HEROES[Math.floor(Math.random() * HEROES.length)].id;
+    return { name: names[k] || aiName(), hero, fur: HERO_BY_ID[hero].fur, hat: hats[Math.floor(Math.random() * hats.length)], ai: sp.ai };
+  });
   beginMatch({
     mode: 'practice', role: 'local', me: 0, aiLevel: sp.ai,
     cfg: {
-      map: resolveMap(sp.map, seed), seed, timeLimit: 600, rules: { ...sp.rules },
-      players: [
-        { name: p.name, hero: p.equip.hero, fur: p.equip.fur, hat: p.equip.hat },
-        { name: aiName(), hero: enemy, fur: HERO_BY_ID[enemy].fur, hat: hats[Math.floor(Math.random() * hats.length)], ai: sp.ai },
-      ],
+      map: resolveMap(sp.map, seed), seed, timeLimit: n > 2 ? 900 : 600, rules: { ...sp.rules },
+      players: [{ name: p.name, hero: p.equip.hero, fur: p.equip.fur, hat: p.equip.hat }, ...foes],
     },
   });
 }

@@ -97,7 +97,13 @@ export class Match {
     }
     // Player 2 sees the (point-symmetric) map turned around, so everyone's base starts on the left
     // (or at the bottom when a portrait screen shows the field standing up).
-    this.flip = this.me === 1;
+    // 2 players: player 2 sees the field turned around. 3-4 players: the view is mirrored so your own base
+    // sits on the left (landscape) / bottom, wherever your seat is.
+    const home = (this.info.buildings || []).find(b => b.o === this.me);
+    if ((this.info.players || []).length > 2 && home) {
+      this.flipX = home.x > WORLD_W / 2 + 1;
+      this.flipY = home.y < WORLD_H / 2 - 1;
+    } else this.flipX = this.flipY = this.me === 1;
     this.rotate = isPortrait();
     if (!this.attract) {
       this.hud = new Hud(hudRoot, this);
@@ -123,15 +129,17 @@ export class Match {
   // ---------- view ----------
   /** world <-> view mapping for this player and screen shape */
   makeView() {
-    const W = WORLD_W, H = WORLD_H, flip = this.flip, rotate = this.rotate;
+    const W = WORLD_W, H = WORLD_H, fx = this.flipX, fy = this.flipY, rotate = this.rotate;
     const fwd = (x, y) => {
-      if (flip) { x = W - x; y = H - y; }
+      if (fx) x = W - x;
+      if (fy) y = H - y;
       return rotate ? { x: y, y: W - x } : { x, y };
     };
     const inv = (x, y) => {
       let wx = x, wy = y;
       if (rotate) { wx = W - y; wy = x; }
-      if (flip) { wx = W - wx; wy = H - wy; }
+      if (fx) wx = W - wx;
+      if (fy) wy = H - wy;
       return { x: wx, y: wy };
     };
     this.fwd = fwd; this.inv = inv;
@@ -291,7 +299,7 @@ export class Match {
         // face the way the squad walks on screen
         const tp = pos.get(to);
         if (tp && Math.abs(tp.x - sx) > 2) fx = tp.x < sx ? (fx | LEFT_BIT) : (fx & ~LEFT_BIT);
-      } else if (this.flip) fx ^= LEFT_BIT;
+      } else if (this.flipX) fx ^= LEFT_BIT;
       const o = { id, owner, count, x: sx, y: sy, fx, to };
       squads.push(o); squadById.set(id, o);
     }
@@ -300,7 +308,7 @@ export class Match {
   }
 
   handleEvent(e, V) {
-    if (e.x != null && e.y != null && (this.flip || this.rotate)) { const p = this.fwd(e.x, e.y); e = { ...e, x: p.x, y: p.y }; }
+    if (e.x != null && e.y != null && (this.flipX || this.flipY || this.rotate)) { const p = this.fwd(e.x, e.y); e = { ...e, x: p.x, y: p.y }; }
     this.renderer.event(e, V);
     if (this.hud) this.hud.onEvent(e, V);
     if (this.attract) return;
@@ -320,6 +328,18 @@ export class Match {
       case 'star': if (e.o === me) audio.play('star'); break;
       case 'emote': audio.play(e.id === 'hiss' ? 'hiss' : e.id === 'love' ? 'purr' : e.id === 'nap' ? 'snore' : 'meow', { vol: 0.7, pitch: e.o === me ? 1.1 : 0.95 }); break;
       case 'warp': audio.play('warp'); break;
+      case 'out':
+        if (e.o !== me || this.over || (this.info.players || []).length <= 2) break;
+        if (this.role === 'local' && this.game && !this.game.over) {
+          // practice: once you're out the battle is over for you (the leading computer cat takes the win)
+          const g = this.game, score = q => g.armyOf(q.idx) + g.buildings.filter(b => b.owner === q.idx).length * 5;
+          const alive = g.players.filter(p => p.alive).sort((a, b) => score(b) - score(a));
+          g.finish(alive.length ? alive[0].idx : -1, 'out');
+        } else if (this.hud) {
+          audio.play('lost');
+          this.hud.toast('😿 You are out! Watching the rest of the battle...', 'theirs', me);
+        }
+        break;
       case 'boom': audio.play(e.fx === 'orbital' ? 'orbital' : 'explosion'); break;
       case 'blocked': audio.play('shield'); break;
       case 'err': if (e.o === me) audio.play('error'); break;

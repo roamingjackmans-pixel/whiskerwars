@@ -127,7 +127,7 @@ export class Renderer {
     this.seed = info.map.seed || 1;
     this.players = info.players;
     // the same walking routes the simulation uses, for drag arrows and the trails painted on the ground
-    try { this.nav = getNav({ buildings: info.buildings, obstacles: info.map.obstacles || [] }); } catch (e) { console.error('nav', e); this.nav = null; }
+    try { this.nav = getNav({ buildings: info.buildings, obstacles: info.map.obstacles || [], rot3: info.map.rot3 }); } catch (e) { console.error('nav', e); this.nav = null; }
     this.setView(view);
   }
   setView(view) {

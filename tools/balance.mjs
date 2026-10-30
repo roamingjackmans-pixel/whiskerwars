@@ -5,7 +5,7 @@ import { MAPS, HEROES, TICK } from '../public/shared/data.js';
 const W = {}, G = {};
 for (const a of HEROES) for (const b of HEROES) {
   if (a.id >= b.id) continue;
-  for (const map of MAPS) for (const swap of [0, 1]) {
+  for (const map of MAPS.filter(m => (m.players || 2) === 2)) for (const swap of [0, 1]) {
     const hs = swap ? [b.id, a.id] : [a.id, b.id];
     const game = new Game({ map: structuredClone(map), seed: map.id.length * 31 + swap, players: hs.map(h => ({ hero: h, ai: 'hard' })) });
     const ais = [new AI(game, 0, 'hard'), new AI(game, 1, 'hard')];

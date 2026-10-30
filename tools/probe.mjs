@@ -8,7 +8,7 @@ if (off === 'passive') H.passive = { ...H.passive, id: 'none' };
 else if (off) H.spells = H.spells.map(s => s.id === off ? { ...s, id: 'shadowstep_x', cost: 999 } : s);
 let w = 0, n = 0;
 for (const opp of HEROES) { if (opp.id === hero) continue;
-  for (const map of MAPS) for (const swap of [0, 1]) {
+  for (const map of MAPS.filter(m => (m.players || 2) === 2)) for (const swap of [0, 1]) {
     const hs = swap ? [opp.id, hero] : [hero, opp.id];
     const game = new Game({ map: structuredClone(map), seed: 5 + swap, players: hs.map(h => ({ hero: h, ai: 'hard' })) });
     const ais = [new AI(game, 0, 'hard'), new AI(game, 1, 'hard')];

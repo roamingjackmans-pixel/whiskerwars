@@ -363,6 +363,69 @@ const hedge = (pts, w = 42) => ({ t: 'hedge', pts, w });
 const wall = (pts, w = 44) => ({ t: 'wall', pts, w });
 const C = o => ({ ...o, center: true });
 
+// ---------------- 3 and 4 player maps ----------------
+// 4 players: list the top-left quarter; mirror4 copies it into all four corners (seats go clockwise from the
+// top left: 0 TL, 1 TR, 2 BR, 3 BL). Pieces on the middle lines appear twice, the centre once.
+const finish = list => list.map((b, i) => ({ id: i, x: b.x, y: b.y, type: b.type, level: b.level || 1, owner: b.owner ?? -1, count: b.count ?? 10 }));
+function mirror4(quarter) {
+  const out = [], seen = new Set();
+  for (const b of quarter) {
+    for (const [x, y, k] of [[b.x, b.y, 0], [WORLD_W - b.x, b.y, 1], [WORLD_W - b.x, WORLD_H - b.y, 2], [b.x, WORLD_H - b.y, 3]]) {
+      const key = Math.round(x) + ',' + Math.round(y);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ ...b, x, y, owner: b.owner === 0 ? k : -1 });
+    }
+  }
+  return finish(out);
+}
+// 3 players: list one base's share; rot3 turns it to the other two bases around the centre (cx, cy).
+// (center:true pieces sit on the centre and appear once.)
+function rot3(share, cx, cy) {
+  const out = [];
+  for (let k = 0; k < 3; k++) for (const b of share) {
+    if (b.center && k) continue;
+    const [x, y] = turn([b.x, b.y], cx, cy, k);
+    out.push({ ...b, x, y, owner: b.owner === 0 ? k : -1 });
+  }
+  return finish(out);
+}
+function turn([x, y], cx, cy, k) {
+  const a = k * 2 * Math.PI / 3, c = Math.cos(a), s = Math.sin(a), dx = x - cx, dy = y - cy;
+  return [Math.round((cx + dx * c - dy * s) * 10) / 10, Math.round((cy + dx * s + dy * c) * 10) / 10];
+}
+// terrain counterparts: same copies for ponds, rivers, hedges and lumps (duplicates on the middle lines dropped)
+function shapeKey(o) {
+  const P = (o.poly || o.pts || [[o.x, o.y]]).map(p => Math.round(p[0]) + ',' + Math.round(p[1])).sort().join(';');
+  return [o.t, o.w || 0, o.r || 0, o.rx || 0, o.ry || 0, P].join('|');
+}
+function moveShape(o, f, angle) {
+  const m = { ...o };
+  delete m.center;
+  if (m.poly) m.poly = m.poly.map(f);
+  if (m.pts) m.pts = m.pts.map(f);
+  if (m.x != null) { [m.x, m.y] = f([m.x, m.y]); if (m.rx != null) m.a = angle(m.a || 0); }
+  return m;
+}
+function terrain4(quarter) {
+  const out = [], seen = new Set();
+  const flips = [[false, false], [true, false], [true, true], [false, true]];
+  for (const o of quarter) for (const [fx, fy] of flips) {
+    const m = moveShape(o, ([x, y]) => [fx ? WORLD_W - x : x, fy ? WORLD_H - y : y], a => (fx !== fy ? -a : a));
+    const k = shapeKey(m);
+    if (!seen.has(k)) { seen.add(k); out.push(m); }
+  }
+  return out;
+}
+function terrain3(share, cx, cy) {
+  const out = [];
+  for (let k = 0; k < 3; k++) for (const o of share) {
+    if (o.center && k) continue;
+    out.push(moveShape(o, p => turn(p, cx, cy, k), a => a + k * 2 * Math.PI / 3));
+  }
+  return out;
+}
+
 export const MAPS = [
   {
     id: 'meadow', name: 'Sunny Meadow', theme: 'meadow', size: 'Small', desc: 'A gentle first battlefield. Grab the strays and charge!',
@@ -672,7 +735,119 @@ export const MAPS = [
   },
 ];
 // map pickers list each theme's classic open map first, then its terrain maps
-{ const order = Object.keys(THEMES); MAPS.sort((a, b) => order.indexOf(a.theme) - order.indexOf(b.theme)); }
+// ---- 3 player maps (centre of the triangle a bit below the middle, so the three bases fit the field)
+const T3 = [800, 540];
+const at3 = (r, deg) => ({ x: Math.round(T3[0] + r * Math.cos(deg * Math.PI / 180)), y: Math.round(T3[1] + r * Math.sin(deg * Math.PI / 180)) });
+const pt3 = (r, deg) => { const p = at3(r, deg); return [p.x, p.y]; };
+// the lagoon map sits a little higher and tighter, so no road gets squeezed against the bottom edge
+const L3 = [800, 515];
+const atL = (r, deg) => ({ x: Math.round(L3[0] + r * Math.cos(deg * Math.PI / 180)), y: Math.round(L3[1] + r * Math.sin(deg * Math.PI / 180)) });
+const ptL = (r, deg) => { const p = atL(r, deg); return [p.x, p.y]; };
+MAPS.push(
+  {
+    id: 'tripaws', rot3: T3, name: 'Three Paws', theme: 'night', size: 'Medium', players: 3, desc: 'Three clowders, one Cat Tree. Every neighbour is the same distance away.',
+    buildings: rot3([
+      { ...at3(430, -90), type: 'cottage', level: 2, owner: 0, count: 20 },
+      { ...at3(290, -122), type: 'cottage', count: 8 },
+      { ...at3(290, -58), type: 'cottage', count: 8 },
+      { ...at3(205, -90), type: 'tower', count: 14 },
+      { ...at3(255, -30), type: 'garden', count: 12 },
+      { x: T3[0], y: T3[1], type: 'cattree', count: 45, center: true },
+    ], ...T3),
+  },
+  {
+    id: 'trilagoon', rot3: L3, name: 'Tri-Pond Lagoon', theme: 'beach', size: 'Medium', players: 3, desc: 'A lagoon with an island in the middle. Each of you gets one bridge to it.',
+    buildings: rot3([
+      { ...atL(405, -90), type: 'cottage', level: 2, owner: 0, count: 20 },
+      { ...atL(280, -126), type: 'cottage', count: 8 },
+      { ...atL(280, -54), type: 'cottage', count: 8 },
+      { ...atL(240, -90), type: 'forge', count: 12 },
+      { x: L3[0], y: L3[1], type: 'cattree', count: 45, center: true },
+    ], ...L3),
+    obstacles: terrain3([
+      C(pond(L3[0], L3[1], 165)),
+      C(island(L3[0], L3[1], 95)),
+      { t: 'bridge', pts: [ptL(78, -90), ptL(198, -90)], w: 86 },
+    ], ...L3),
+  },
+  {
+    id: 'triridge', rot3: T3, name: 'Three Ridges', theme: 'snow', size: 'Medium', players: 3, desc: 'Snowy ridges split the peak three ways. Squeeze past the middle or go the long way round.',
+    buildings: rot3([
+      { ...at3(430, -90), type: 'cottage', level: 2, owner: 0, count: 20 },
+      { ...at3(300, -124), type: 'cottage', count: 8 },
+      { ...at3(300, -56), type: 'cottage', count: 8 },
+      { ...at3(215, -90), type: 'cottage', level: 2, count: 16 },
+    ], ...T3),
+    obstacles: terrain3([
+      C(mound(T3[0], T3[1], 88, 80, 0.12, false)),
+      ridge([pt3(205, -30), pt3(345, -30)], 56),
+    ], ...T3),
+  },
+);
+// ---- 4 player maps (mirrored into all four corners)
+MAPS.push(
+  {
+    id: 'fourcorners', name: 'Four Corners', theme: 'meadow', size: 'Large', players: 4, desc: 'One corner each and a Cat Tree in the middle. Make friends... briefly.',
+    buildings: mirror4([
+      { x: 170, y: 140, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 170, y: 340, type: 'cottage', count: 8 },
+      { x: 430, y: 300, type: 'cottage', count: 12 },
+      { x: 650, y: 160, type: 'tower', count: 14 },
+      { x: 600, y: 360, type: 'forge', count: 14 },
+      { x: 800, y: 250, type: 'cottage', count: 15 },
+      { x: 330, y: 450, type: 'cottage', count: 12 },
+      { x: 800, y: 450, type: 'cattree', count: 50 },
+    ]),
+  },
+  {
+    id: 'quarters', name: 'Rooftop Quarters', theme: 'rooftop', size: 'Medium', players: 4, desc: 'Four rooftops, four cat gangs, no rules.',
+    buildings: mirror4([
+      { x: 180, y: 150, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 180, y: 360, type: 'cottage', count: 8 },
+      { x: 420, y: 160, type: 'cottage', count: 10 },
+      { x: 450, y: 340, type: 'tower', count: 14 },
+      { x: 680, y: 200, type: 'cottage', count: 14 },
+      { x: 800, y: 330, type: 'garden', count: 16 },
+      { x: 620, y: 450, type: 'forge', count: 15 },
+    ]),
+  },
+  {
+    id: 'crossroads', name: 'River Crossroads', theme: 'beach', size: 'Large', players: 4, desc: 'Rivers split the docks into four. One bridge to each neighbour, and a Cat Tree where the rivers end.',
+    buildings: mirror4([
+      { x: 160, y: 140, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 400, y: 120, type: 'cottage', count: 8 },
+      { x: 160, y: 330, type: 'cottage', count: 8 },
+      { x: 450, y: 290, type: 'cottage', count: 12 },
+      { x: 640, y: 200, type: 'tower', count: 14 },
+      { x: 560, y: 340, type: 'forge', count: 14 },
+      { x: 800, y: 450, type: 'cattree', count: 48 },
+    ]),
+    obstacles: terrain4([
+      river([[800, -60], [800, 290]], 90),
+      river([[-60, 450], [610, 450]], 90),
+      bridge(722, 150, 878, 150, 86),
+      bridge(300, 372, 300, 528, 86),
+    ]),
+  },
+  {
+    id: 'clover', name: 'Hedge Clover', theme: 'night', size: 'Large', players: 4, desc: 'Hedges ring the middle cottage and fence off each corner. Find the gaps.',
+    buildings: mirror4([
+      { x: 170, y: 150, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 420, y: 130, type: 'cottage', count: 8 },
+      { x: 160, y: 340, type: 'cottage', count: 10 },
+      { x: 430, y: 320, type: 'cottage', count: 12 },
+      { x: 640, y: 170, type: 'garden', count: 14 },
+      { x: 800, y: 450, type: 'cottage', level: 2, count: 26 },
+    ]),
+    obstacles: terrain4([
+      hedge([[585, 392], [612, 352], [652, 320], [720, 292]]),
+      hedge([[800, 30], [800, 205]]),
+      hedge([[30, 450], [255, 450]]),
+    ]),
+  },
+);
+// map pickers list 2-player maps, then 3, then 4; each theme's classic open map first, then its terrain maps
+{ const order = Object.keys(THEMES); MAPS.sort((a, b) => ((a.players || 2) - (b.players || 2)) || (order.indexOf(a.theme) - order.indexOf(b.theme))); }
 export const MAP_BY_ID = Object.fromEntries(MAPS.map(m => [m.id, m]));
 
 // Seeded random symmetric map

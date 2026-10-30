@@ -10,19 +10,29 @@ let bad = 0;
 for (const map of list) {
   if (ids.length && !ids.includes(map.id)) continue;
   const t0 = performance.now();
-  const nav = new Nav(map.buildings, map.obstacles || []);
+  const nav = new Nav(map.buildings, map.obstacles || [], { rot3: map.rot3 });
   const ms = performance.now() - t0;
   const B = map.buildings, problems = [];
   // clear ground under every building
   for (const b of B) if (nav.blockTest(b.x, b.y, 50)) problems.push(`building ${b.id} (${b.x},${b.y}) is too close to terrain`);
   if (nav.unreachable) problems.push(`${nav.unreachable} building pairs cannot reach each other`);
-  // terrain grid is point-symmetric
+  const seats = map.players || 2;
+  const bases = B.filter(b => b.owner >= 0);
+  if (bases.length !== seats) problems.push(`${bases.length} starting bases for ${seats} players`);
+  // terrain grid is point-symmetric (2 and 4 players; 4-player maps are mirrored both ways too)
   let asym = 0;
-  for (let c = 0; c < NAV_COLS * NAV_ROWS; c++) if (nav.blocked[c] !== nav.blocked[NAV_COLS * NAV_ROWS - 1 - c]) asym++;
+  if (seats !== 3) for (let c = 0; c < NAV_COLS * NAV_ROWS; c++) if (nav.blocked[c] !== nav.blocked[NAV_COLS * NAV_ROWS - 1 - c]) asym++;
   if (asym) problems.push(`${asym} terrain cells are not mirrored`);
+  // every seat sees the same roads: compare each base's sorted walking distances to everything else
+  let seatGap = 0;
+  if (seats > 2) {
+    const prof = bases.map(a => B.filter(b => b !== a).map(b => nav.len(a.id, b.id)).sort((x, y) => x - y));
+    for (const p of prof) for (let k = 0; k < p.length; k++) seatGap = Math.max(seatGap, Math.abs(p[k] - prof[0][k]) / Math.max(200, prof[0][k]));
+    if (seatGap > 0.05) problems.push(`seats differ: roads up to ${(seatGap * 100).toFixed(1)}% longer for one player`);
+  }
   // routes are fair: P0's road from a to b is as long as P1's road between the mirrored buildings
   // (an old map may have a "centre" building a little off centre: it counts as its own mirror)
-  const mirrorOf = b => B.find(o => Math.abs(o.x - (WORLD_W - b.x)) < 0.5 && Math.abs(o.y - (WORLD_H - b.y)) < 0.5) || (Math.abs(b.x - WORLD_W / 2) < 1 ? b : null);
+  const mirrorOf = b => B.find(o => Math.abs(o.x - (WORLD_W - b.x)) < 0.5 && Math.abs(o.y - (WORLD_H - b.y)) < 0.5) || (Math.abs(b.x - WORLD_W / 2) < 1 ? b : null) || (seats === 3 ? b : null);
   let worstFair = 0, worstDetour = 0, sumDetour = 0, n = 0, worstPair = '';
   for (const a of B) for (const b of B) {
     if (a.id >= b.id) continue;
@@ -30,16 +40,16 @@ for (const map of list) {
     const ma = mirrorOf(a), mb = mirrorOf(b);
     if (!ma || !mb) { problems.push(`building ${a.id} or ${b.id} has no mirror`); continue; }
     const offCentre = o => mirrorOf(o) === o && Math.abs(o.y - WORLD_H / 2) > 1;
-    if (!offCentre(a) && !offCentre(b)) worstFair = Math.max(worstFair, Math.abs(L - nav.len(ma.id, mb.id)) / L);
+    if (seats !== 3 && !offCentre(a) && !offCentre(b)) worstFair = Math.max(worstFair, Math.abs(L - nav.len(ma.id, mb.id)) / L);
     const r = L / st;
     if (r > worstDetour) { worstDetour = r; worstPair = `${a.id}->${b.id} ${Math.round(st)} vs ${Math.round(L)}`; }
     sumDetour += r; n++;
   }
-  const lopsided = B.some(b => mirrorOf(b) === b && Math.abs(b.y - WORLD_H / 2) > 1);
+  const lopsided = seats === 2 && B.some(b => mirrorOf(b) === b && Math.abs(b.y - WORLD_H / 2) > 1);
   if (worstFair > 0.04 && !lopsided) problems.push(`routes differ between the two sides by up to ${(worstFair * 100).toFixed(1)}%`);
   else if (lopsided) console.log('   (note: this map has a "centre" building off the centre, so it is not exactly symmetric)');
   const p0 = B.find(b => b.owner === 0), p1 = B.find(b => b.owner === 1);
-  console.log(`${(map.id + (map.id === 'random' ? '#' + map.name.split('#')[1] : '')).padEnd(13)} ${String(B.length).padStart(2)} bldg ${String((map.obstacles || []).length).padStart(2)} obst  nav ${ms.toFixed(0).padStart(3)}ms  bases ${Math.round(nav.len(p0.id, p1.id))} (straight ${Math.round(Math.hypot(p0.x - p1.x, p0.y - p1.y))})  detour avg ${(sumDetour / n).toFixed(2)} max ${worstDetour.toFixed(2)} [${worstPair}]  fair ${(worstFair * 100).toFixed(1)}%`);
+  console.log(`${(map.id + (map.id === 'random' ? '#' + map.name.split('#')[1] : '')).padEnd(13)} ${seats}p ${String(B.length).padStart(2)} bldg ${String((map.obstacles || []).length).padStart(2)} obst  nav ${ms.toFixed(0).padStart(3)}ms  bases ${Math.round(nav.len(p0.id, p1.id))} (straight ${Math.round(Math.hypot(p0.x - p1.x, p0.y - p1.y))})  detour avg ${(sumDetour / n).toFixed(2)} max ${worstDetour.toFixed(2)} [${worstPair}]  fair ${(worstFair * 100).toFixed(1)}%${seats > 2 ? ` seats ${(seatGap * 100).toFixed(1)}%` : ''}`);
   for (const p of problems) { console.log('   !! ' + p); bad++; }
   if (ids.length) draw(map, nav);
 }
@@ -62,7 +72,7 @@ function draw(map, nav) {
   const sym = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   for (const b of map.buildings) {
     const i = Math.floor(b.x / S), j = Math.floor(b.y / S);
-    rows[j][i] = b.owner === 0 ? 'P' : b.owner === 1 ? 'Q' : sym[b.id % sym.length];
+    rows[j][i] = b.owner >= 0 ? 'PQRS'[b.owner] : sym[b.id % sym.length];
   }
   console.log(rows.map(r => '   ' + r.join('')).join('\n'));
 }
