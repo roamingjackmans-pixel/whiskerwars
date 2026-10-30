@@ -315,6 +315,8 @@ export class Renderer {
       if (this.fxLevel !== 'low' && Math.random() < 0.35) this.spawn({ x: s.x + rand(-r, r) * 0.6, y: s.y + rand(-4, 2), vx: left ? 30 : -30, vy: -10, life: 0.35, size: 3, color: has(s.fx, 's_haste') ? '#ff7a2f' : '#ffd84d', kind: 'dot' });
     }
     if (owner && (owner.buffs & 2) && this.fxLevel !== 'low' && Math.random() < 0.08) this.spawn({ x: s.x, y: s.y - 14, vx: rand(-10, 10), vy: -25, life: 0.6, size: 4, color: '#fff3c4', kind: 'dot' });
+    // high Purr Power: golden stars twinkle off the whole army
+    if (owner && owner.stars >= 3 && this.fxLevel !== 'low' && Math.random() < 0.035 * (owner.stars - 2)) this.spawn({ x: s.x + rand(-r, r) * 0.7, y: s.y - 10 - rand(0, 12), vx: rand(-8, 8), vy: -28, life: 0.7, size: 3.5 + owner.stars * 0.4, color: owner.stars >= 5 ? '#ffe066' : '#ffd23d', kind: 'star' });
   }
   drawSquadBadge(ctx, s) {
     const n = Math.max(1, Math.round(s.count));

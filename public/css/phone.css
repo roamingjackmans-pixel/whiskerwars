@@ -19,7 +19,14 @@
 .hud.phone .pname { font-size: 12px; max-width: 100%; }
 .hud.phone .phero { display: none; }
 .hud.phone .pmeta { font-size: 10px; gap: 5px; }
-.hud.phone .pcard .stars { letter-spacing: 0; }
+.hud.phone .pcard .purr { padding: 0 5px; margin-top: 1px; }
+.hud.phone .pcard .purr .pl, .hud.phone .pcard .purr .pb { display: none; }
+.hud.phone .pcard .purr .ps { font-size: 14px; }
+.hud.phone .ph-purr { display: none; pointer-events: none; }
+.hud.phone .purr-burst { top: 30%; }
+.hud.phone .purr-burst .pbs { font-size: 38px; }
+.hud.phone .purr-burst .pbt { font-size: 24px; }
+.hud.phone .purr-burst .pbd { font-size: 13px; }
 .hud.phone .hud-center { gap: 3px; }
 .hud.phone .timer { font-size: 15px; min-width: 52px; padding: 0 6px; border-width: 1.5px; border-radius: 9px; }
 .hud.phone .armybar { width: 26vw; max-width: 150px; height: 12px; border-width: 1.5px; }
@@ -37,7 +44,7 @@
 .hud.phone .pct-btn small { font-size: 10px; opacity: .8; margin-left: 1px; }
 .hud.phone .pct-btn.on { box-shadow: 0 2px 0 var(--pink-d); }
 .hud.phone .mystat { position: relative; display: flex; flex-direction: column; justify-content: center; gap: 2px; font-weight: 700; font-size: 11px; line-height: 1.1; color: #fff; }
-.hud.phone .mystat .stars { font-size: 11px; letter-spacing: 0; white-space: nowrap; }
+.hud.phone .mystat .bcount { white-space: nowrap; }
 .hud.phone .catnip { min-width: 0; width: 100%; height: 16px; border-width: 1.5px; }
 .hud.phone .catnip-txt { font-size: 10px; }
 .hud.phone .all-btn {
@@ -73,6 +80,13 @@
   box-shadow: 0 -2px 12px rgba(0, 0, 0, .25);
 }
 .hud.phone.portrait .ph-row { display: flex; align-items: stretch; gap: 6px; }
+/* your own card is hidden in portrait, so your Purr Power gets its own strip in the dock */
+.hud.phone.portrait .ph-purr { display: flex; justify-content: center; margin: -2px 0 -1px; }
+.hud.phone.portrait .ph-purr .purr { gap: 6px; padding: 2px 12px; border-radius: 12px; background: rgba(0,0,0,.3); }
+.hud.phone.portrait .ph-purr .ps { font-size: 20px; }
+.hud.phone.portrait .ph-purr .pl { display: inline; font-size: 11px; }
+.hud.phone.portrait .ph-purr .pb { display: inline; font-size: 12px; }
+.hud.phone.portrait .ph-purr .pb:empty { display: none; }
 .hud.phone.portrait .mystat { flex: 1 1 0; min-width: 56px; }
 .hud.phone.portrait .all-btn { flex: 0 0 50px; }
 .hud.phone.portrait .spells { flex: 0 0 auto; }
@@ -86,7 +100,7 @@
 .hud.phone.landscape .pct-btn { height: 42px; }
 .hud.phone.landscape .all-btn { position: absolute; left: calc(env(safe-area-inset-left) + 6px); top: calc(50% + 74px); width: 56px; height: 50px; background: var(--pbg); }
 .hud.phone.landscape .mystat { position: absolute; right: calc(env(safe-area-inset-right) + 6px); top: calc(50% - 126px); width: 58px; }
-.hud.phone.landscape .mystat .stars, .hud.phone.landscape .mystat .bcount { display: none; }
+.hud.phone.landscape .mystat .bcount { display: none; }
 .hud.phone.landscape .catnip { height: 20px; }
 .hud.phone.landscape .spells { position: absolute; right: calc(env(safe-area-inset-right) + 6px); top: calc(50% - 98px); flex-direction: column; }
 .hud.phone.landscape .spell { width: 58px; height: 54px; }

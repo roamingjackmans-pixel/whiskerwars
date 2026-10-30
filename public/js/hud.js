@@ -1,5 +1,5 @@
 // Whisker Wars in-match HUD (HTML overlay on top of the canvas).
-import { HERO_BY_ID, BUILDINGS, CONVERT_COST, EMOTES, MAX_CATNIP, RULES, teamColor, findSpell } from '../shared/data.js';
+import { HERO_BY_ID, BUILDINGS, CONVERT_COST, EMOTES, MAX_CATNIP, RULES, PURR_PER_STAR, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, teamColor, findSpell } from '../shared/data.js';
 import { heroPortraitURL } from './art.js';
 import { audio } from './audio.js';
 import { profile, setSetting, save as saveProfile } from './profile.js';
@@ -8,6 +8,10 @@ const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls)
 const fmtTime = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
 const TARGET_LABEL = { own: 'Your building', enemy: 'Enemy building', neutral: 'Stray building', notown: 'Enemy or stray building', area: 'Area', global: 'Instant' };
 const safeURL = (id, s) => { try { return heroPortraitURL(id, s); } catch { return ''; } };
+const PURR_TIP = 'Purr Power: capture buildings and win fights to earn stars. Each star gives all your cats +4% attack and +3% speed. Losing buildings and cats drains it.';
+// five stars; the next one fills up as you earn purr
+const purrMeter = (side, label = true) => `<span class="purr" data-side="${side}" title="${PURR_TIP}">${label ? '<span class="pl">PURR</span>' : ''}<span class="pss">${'<i class="ps">★</i>'.repeat(5)}</span><span class="pb"></span></span>`;
+const purrBonus = n => n > 0 ? `+${Math.round(n * PURR_ATK_PER_STAR * 100)}% ⚔ +${Math.round(n * PURR_SPD_PER_STAR * 100)}% 💨` : '';
 
 export class Hud {
   constructor(root, match) {
@@ -32,7 +36,8 @@ export class Hud {
         <div class="pinfo">
           <div class="pname">${esc(P[i].name)}${P[i].ai ? ' <span class="tag">AI</span>' : ''}</div>
           <div class="phero">${h.name}</div>
-          <div class="pmeta"><span class="stars" title="Purr Power: boosts attack & speed">☆☆☆☆☆</span><span class="bcount" title="Buildings">🏠 0</span></div>
+          <div class="pmeta"><span class="bcount" title="Buildings">🏠 0</span></div>
+          ${purrMeter(side)}
         </div>
         <div class="emote-pop"></div>
       </div>`;
@@ -90,10 +95,11 @@ export class Hud {
         ${ruleIcons}
       </div>
       <div class="ph-dock">
+        <div class="ph-purr">${purrMeter('me')}</div>
         <div class="pct">${[0.25, 0.5, 0.75, 1].map(p => `<button class="pct-btn" data-p="${p}">${p * 100}<small>%</small></button>`).join('')}</div>
         <div class="ph-row">
           <div class="mystat">
-            <span class="stars" title="Purr Power">☆☆☆☆☆</span><span class="bcount">🏠 0</span>
+            <span class="bcount">🏠 0</span>
             ${catnip}
             <div class="emote-pop"></div>
           </div>
@@ -121,7 +127,7 @@ export class Hud {
     this.els = {
       timer: $('.timer'), fillMe: $('.armybar .fill.me'), fillOpp: $('.armybar .fill.opp'), armyL: $('.armybar .l'), armyR: $('.armybar .r'),
       catFill: $('.catnip-fill'), catTxt: $('.catnip-txt'), spells: [...this.root.querySelectorAll('.spell')],
-      starsMe: [...this.root.querySelectorAll('.pcard.me .stars, .mystat .stars')], starsOpp: $('.pcard.opp .stars'),
+      purr: [...this.root.querySelectorAll('.purr')].map(e => ({ e, side: e.dataset.side, stars: [...e.querySelectorAll('.ps')], bonus: e.querySelector('.pb'), n: -1, v: -1 })),
       bMe: [...this.root.querySelectorAll('.pcard.me .bcount, .mystat .bcount')], bOpp: $('.pcard.opp .bcount'),
       toasts: $('.toasts'), bmenu: $('.bmenu'), tip: $('.spell-tip'), wheel: $('.emote-wheel'), hint: $('.targeting-hint'), ping: $('.ping'),
     };
@@ -237,8 +243,15 @@ export class Hud {
     this.els.fillMe.style.width = (me.army / tot * 100) + '%';
     this.els.fillOpp.style.width = (op.army / tot * 100) + '%';
     this.els.armyL.textContent = me.army; this.els.armyR.textContent = op.army;
-    const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n);
-    this.els.starsMe.forEach(e => { e.textContent = stars(me.stars); }); this.els.starsOpp.textContent = stars(op.stars);
+    for (const P of this.els.purr) {
+      const pl = P.side === 'me' ? me : op, v = pl.purr || 0, n = pl.stars;
+      if (v === P.v && n === P.n) continue;
+      P.stars.forEach((s, k) => { const f = Math.max(0, Math.min(1, (v - k * PURR_PER_STAR) / PURR_PER_STAR)); s.style.setProperty('--f', f.toFixed(2)); s.classList.toggle('on', k < n); });
+      P.bonus.textContent = purrBonus(n);
+      if (P.n >= 0 && n !== P.n) { P.e.classList.remove('up', 'down'); void P.e.offsetWidth; P.e.classList.add(n > P.n ? 'up' : 'down'); }
+      P.e.classList.toggle('max', n >= 5);
+      P.v = v; P.n = n;
+    }
     let bm = 0, bo = 0;
     for (const b of V.buildings) { if (b.owner === this.me) bm++; else if (b.owner === this.opp) bo++; }
     this.els.bMe.forEach(e => { e.textContent = '🏠 ' + bm; }); this.els.bOpp.textContent = '🏠 ' + bo;
@@ -271,7 +284,11 @@ export class Hud {
         break;
       }
       case 'err': if (e.o === me) this.toast(e.msg, 'warn'); break;
-      case 'star': if (e.o === me) this.toast(`⭐ Purr Power ${'★'.repeat(e.n)} — your cats get stronger!`, 'mine'); break;
+      case 'star':
+        if (e.o === me) this.purrBurst(e.n, true);
+        else this.toast(`⭐ ${esc(this.info.players[e.o].name)} reached Purr Power ${'★'.repeat(e.n)}`, 'theirs', e.o);
+        break;
+      case 'unstar': if (e.o === me) this.purrBurst(e.n, false); break;
       case 'emote': {
         // (portrait phones hide your own card; your emotes pop from the dock instead)
         const card = e.o === me
@@ -285,6 +302,17 @@ export class Hud {
     }
   }
 
+  /** big middle-of-the-screen announcement when your Purr Power gains or loses a star */
+  purrBurst(n, up) {
+    const old = this.root.querySelector('.purr-burst');
+    if (old) old.remove();
+    const stars = '★'.repeat(n) + '<s>' + '★'.repeat(5 - n) + '</s>';
+    const b = el('div', 'purr-burst ' + (up ? 'up' : 'down'), up
+      ? `<div class="pbs">${stars}</div><div class="pbt">PURR POWER${n >= 5 ? ' MAX!' : '!'}</div><div class="pbd">All your cats ${purrBonus(n)}</div>`
+      : `<div class="pbs">${stars}</div><div class="pbt">Purr Power down</div><div class="pbd">${n ? 'Now ' + purrBonus(n) : 'Capture buildings to purr again'}</div>`);
+    this.root.appendChild(b);
+    setTimeout(() => b.remove(), up ? 2200 : 1700);
+  }
   toast(html, kind = '', owner = -1) {
     const t = el('div', 'toast ' + kind, html);
     if (owner >= 0) t.style.setProperty('--tc', teamColor(owner).main);
