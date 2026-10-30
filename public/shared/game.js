@@ -3,8 +3,9 @@
 import {
   WORLD_W, WORLD_H, TICK, BASE_SPEED, MAX_CATNIP, BASE_CATNIP_REGEN, START_CATNIP, TIME_LIMIT,
   OVERCAP_DECAY, SQUAD_CHUNK, PURR_PER_STAR, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR,
-  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, mulberry32,
+  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, mulberry32,
 } from './data.js';
+import { getNav } from './nav.js';
 
 // Effect flag bits (shared with the client renderer)
 export const BFX = ['shield', 'stink', 'disabled', 'curse', 'tea', 'fortify', 'firewall', 'hack', 'turret', 'shadowstep', 'frozen'];
@@ -51,7 +52,8 @@ export class Game {
     this.pending = [];      // delayed spell impacts
     this.projectiles = [];  // tower shots in flight
     this.events = [];
-    this.pathCache = new Map();
+    // walking routes between buildings, around the map's ponds, walls and mounds (worked out once per map)
+    this.nav = getNav(cfg.map);
     this.over = false;
     this.winner = -1;
     this.endReason = '';
@@ -150,33 +152,21 @@ export class Game {
   }
 
   // ---------- paths ----------
-  path(from, to) {
-    const key = from.id * 4096 + to.id;
-    let p = this.pathCache.get(key);
-    if (!p) { p = this.computePath(from.x, from.y, to, from.id); this.pathCache.set(key, p); }
-    return p;
-  }
-  computePath(x0, y0, to, excludeId) {
-    const dx = to.x - x0, dy = to.y - y0, L = Math.hypot(dx, dy) || 1;
-    const ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
-    const dets = [];
-    for (const c of this.buildings) {
-      if (c.id === to.id || c.id === excludeId) continue;
-      const rx = c.x - x0, ry = c.y - y0;
-      const t = rx * ux + ry * uy;
-      if (t <= 10 || t >= L - 10) continue;
-      const perp = rx * nx + ry * ny;
-      const R = this.radius(c) + 20;
-      if (Math.abs(perp) < R) {
-        const side = perp > 0 ? -1 : 1;
-        const off = R + 8;
-        dets.push({ t, x: clamp(c.x + nx * side * off, 30, WORLD_W - 30), y: clamp(c.y + ny * side * off, 40, WORLD_H - 30) });
-      }
+  /** Waypoints from building to building (shared, read-only arrays). */
+  path(from, to) { return this.nav.path(from.id, to.id); }
+  /** Walking distance between two buildings: what travel time, AI choices and previews go by. */
+  pathLen(from, to) { return this.nav.len(from.id, to.id); }
+  /** Waypoints from any point to a building, e.g. a squad turned around mid-field. */
+  computePath(x0, y0, to) { return this.nav.pathFrom(x0, y0, to.id); }
+  /** Your building with the shortest walk to `b`. */
+  nearestOwnedByPath(i, b) {
+    let best = null, bd = Infinity;
+    for (const o of this.buildings) {
+      if (o.owner !== i || o.id === b.id) continue;
+      const d = this.nav.len(b.id, o.id);
+      if (d < bd) { bd = d; best = o; }
     }
-    dets.sort((a, b) => a.t - b.t);
-    const pts = dets.map(d => ({ x: d.x, y: d.y }));
-    pts.push({ x: to.x, y: to.y });
-    return pts;
+    return best;
   }
 
   // ---------- commands ----------
@@ -265,7 +255,6 @@ export class Game {
     if (b.count < cost) return this.err(i, `Needs ${cost} cats to convert`);
     b.count -= cost;
     b.type = c.to; b.level = 1; b.fireCd = 1;
-    this.pathCache.clear();
     this.emit({ k: 'conv', o: i, b: b.id, to: c.to });
   }
 
@@ -356,7 +345,7 @@ export class Game {
         return;
       case 'polymorph':
         if (!['tower', 'forge', 'garden'].includes(b.type)) { this.err(i, 'Only towers, forges and gardens!'); return false; }
-        b.type = 'cottage'; b.level = 1; this.pathCache.clear(); return;
+        b.type = 'cottage'; b.level = 1; return;
       // --- Shadow
       case 'smoke':
         for (const s of this.squads) if (s.owner === i && Math.hypot(s.x - x, s.y - y) <= sp.radius + 6) s.fx.stealth = t + dur;
@@ -405,7 +394,7 @@ export class Game {
       case 'beckon': {
         const n = Math.min(sp.max, Math.floor(b.count * 0.3));
         if (n < 1) { this.err(i, 'Nobody home to beckon!'); return false; }
-        const home = this.nearestOwned(i, b.x, b.y);
+        const home = this.nearestOwnedByPath(i, b);
         if (!home) return false;
         b.count -= n;
         if (b.owner >= 0) this.players[b.owner].stats.lost += n;
@@ -418,9 +407,13 @@ export class Game {
       case 'tractor':
         for (const s of this.enemySquadsIn(i, x, y, sp.radius)) {
           let home = this.byId.get(s.from);
-          if (!home || home.owner !== s.owner) home = this.nearestOwned(s.owner, s.x, s.y);
+          if (!home || home.owner !== s.owner) {
+            home = null;
+            let bd = Infinity;
+            for (const o of this.buildings) if (o.owner === s.owner) { const d = this.nav.distFrom(s.x, s.y, o.id); if (d < bd) { bd = d; home = o; } }
+          }
           if (!home) continue;
-          s.to = home.id; s.path = this.computePath(s.x, s.y, home, -1); s.wp = 0; s.fx.stun = t + 0.6;
+          s.to = home.id; s.path = this.computePath(s.x, s.y, home); s.wp = 0; s.fx.stun = t + 0.6;
         }
         return;
       case 'orbital': this.pending.push({ at: t + sp.delay, k: 'orbital', o: i, b: b.id, x, y }); return;
@@ -505,6 +498,9 @@ export class Game {
     const prev = b.owner;
     b.owner = i;
     b.count = garrison;
+    // a building taken from another player loses one upgrade level (strays keep theirs)
+    const down = prev >= 0 && prev !== i && b.level > 1;
+    if (down) b.level--;
     b.fx = {};
     b.hackBy = -1;
     b.prodAcc = 0;
@@ -516,7 +512,7 @@ export class Game {
     let bonus = 0;
     if (this.passive(i, 'plunder')) p.catnip = Math.min(MAX_CATNIP, p.catnip + 8);
     if (this.passive(i, 'fortune') && this.rng() < 0.3) { b.count += 5; bonus = 5; }
-    this.emit({ k: 'cap', b: b.id, o: i, prev, bonus, spell: bySpell ? 1 : 0 });
+    this.emit({ k: 'cap', b: b.id, o: i, prev, bonus, spell: bySpell ? 1 : 0, down: down ? b.level : 0 });
   }
   fieldCombat() {
     const S = this.squads, t = this.time;
@@ -597,8 +593,8 @@ export class Game {
       if (shooter && b.owner >= 0 && b.count >= 1 && !this.fx(b, 'disabled') && !(this.players[b.owner].eclipsed > t)) {
         b.fireCd -= dt;
         if (b.fireCd <= 0) {
-          let range = def.range ? def.range[b.level - 1] : BUILDINGS.tower.range[1];
-          let every = def.fireEvery ? def.fireEvery[b.level - 1] : BUILDINGS.tower.fireEvery[1];
+          let range = def.range ? def.range[b.level - 1] : TURRET.range;
+          let every = def.fireEvery ? def.fireEvery[b.level - 1] : TURRET.fireEvery;
           if (this.passive(b.owner, 'starcharts')) { range *= 1.25; every *= 0.75; }
           const hacked = this.fx(b, 'hack');
           const shooterOwner = hacked ? b.hackBy : b.owner;
@@ -638,11 +634,18 @@ export class Game {
       if (!to) { this.squads.splice(k, 1); continue; }
       if ((s.fx.laser || 0) > t) {
         const dx = s.lx - s.x, dy = s.ly - s.y, d = Math.hypot(dx, dy);
-        if (d > 4) { const v = BASE_SPEED * 0.5 * dt; s.x += dx / d * Math.min(v, d); s.y += dy / d * Math.min(v, d); s.face = dx < 0 ? 1 : 0; }
+        if (d > 4) {
+          // chase the dot, but not into a pond or through a wall
+          const v = Math.min(BASE_SPEED * 0.5 * dt, d), nx = s.x + dx / d * v, ny = s.y + dy / d * v, nav = this.nav;
+          if (nav.walkable(nx, ny) || !nav.walkable(s.x, s.y)) { s.x = nx; s.y = ny; }
+          else if (nav.walkable(nx, s.y)) s.x = nx;
+          else if (nav.walkable(s.x, ny)) s.y = ny;
+          s.face = dx < 0 ? 1 : 0;
+        }
         s.lasered = true;
         continue;
       }
-      if (s.lasered) { s.lasered = false; s.path = this.computePath(s.x, s.y, to, -1); s.wp = 0; }
+      if (s.lasered) { s.lasered = false; s.path = this.computePath(s.x, s.y, to); s.wp = 0; }
       let rem = this.squadSpeed(s) * dt;
       while (rem > 0 && s.wp < s.path.length) {
         const pt = s.path[s.wp];
@@ -702,8 +705,8 @@ export class Game {
   // ---------- network views ----------
   staticInfo() {
     return {
-      map: { id: this.cfg.map.id, name: this.cfg.map.name, theme: this.cfg.map.theme, seed: this.cfg.seed },
-      buildings: this.buildings.map(b => ({ id: b.id, x: b.x, y: b.y })),
+      map: { id: this.cfg.map.id, name: this.cfg.map.name, theme: this.cfg.map.theme, seed: this.cfg.seed, obstacles: this.cfg.map.obstacles || [] },
+      buildings: this.buildings.map(b => ({ id: b.id, x: b.x, y: b.y, r: this.nav.radiusOf(b.id) })),
       players: this.players.map(p => ({ name: p.name, hero: p.heroId, fur: p.fur, hat: p.hat, ai: p.ai })),
       timeLimit: this.timeLimit,
       rules: this.rules,

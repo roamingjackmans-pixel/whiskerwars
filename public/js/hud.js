@@ -336,7 +336,7 @@ export class Hud {
     this.bmenuKey = key;
     let info = '';
     if (def.prod[b.level - 1]) info = `🐱 ${def.prod[b.level - 1].toFixed(2)}/s · holds ${b.cap}`;
-    else if (def.range) info = `🎯 range ${def.range[b.level - 1]} · holds ${b.cap}`;
+    else if (def.range) info = `🎯 range ${def.range[b.level - 1]}${def.range[b.level] ? ` (next ${def.range[b.level]})` : ''} · holds ${b.cap}`;
     else if (def.atkBonus) info = `⚔ +${Math.round(def.atkBonus[b.level - 1] * 100)}% attack for all cats`;
     else if (def.catnipBonus) info = `🌿 +${Math.round(def.catnipBonus[b.level - 1] * 100)}% catnip regen`;
     const m = this.els.bmenu;

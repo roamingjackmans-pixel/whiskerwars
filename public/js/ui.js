@@ -9,6 +9,7 @@ import { Match } from './match.js';
 import { OnlineSession } from './online.js';
 import { detectServer, cleanCode } from './net.js';
 import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
+import { normalizeObstacles } from '../shared/nav.js';
 import { isPhone, applyDeviceClass, enterFullscreen, keepAwake, deviceSummary, desktopSiteMode } from './device.js';
 import { BUILD, isDev, versionLabel, fetchLatest, isNewer, reloadTo } from './update.js';
 
@@ -239,14 +240,33 @@ function showHero(id, after) {
   const eq = $('.act-equip', m.el);
   if (eq) eq.onclick = () => { P.equip('hero', id); m.close(); after && after(); };
 }
+// thumbnail colours for terrain: [water, solid lumps, hedges/walls, bridges]
+const MINI_TERRAIN = {
+  meadow: ['#4aa8d8', '#9a6e42', '#3f8f3a', '#b98552'], rooftop: ['#3a2530', '#8a4634', '#843f30', '#b3865c'],
+  snow: ['#4a85bb', '#a9c2df', '#8fc0e6', '#b98d64'], night: ['#15304a', '#3b4653', '#1b4537', '#86735e'],
+  beach: ['#2a9fc4', '#d0aa68', '#7b736c', '#d6ab76'], candy: ['#6a3820', '#663620', '#ff5d8f', '#ebbc7c'],
+};
+function miniTerrain(m, th) {
+  const C = MINI_TERRAIN[m.theme] || MINI_TERRAIN.meadow, k = 10;
+  const pts = s => s.pts.map(([x, y]) => `${(x / k).toFixed(1)},${(y / k).toFixed(1)}`).join(' ');
+  const el = (s, fill) => s.g === 'circle' ? `<circle cx="${s.x / k}" cy="${s.y / k}" r="${s.r / k}" fill="${fill}"/>`
+    : s.g === 'poly' ? `<polygon points="${pts(s)}" fill="${fill}"/>`
+    : `<polyline points="${pts(s)}" fill="none" stroke="${fill}" stroke-width="${s.w / k}" stroke-linecap="${s.t === 'bridge' ? 'butt' : 'round'}" stroke-linejoin="round"/>`;
+  const S = normalizeObstacles(m.obstacles);
+  return S.filter(s => s.cls === 'water').map(s => el(s, C[0])).join('')
+    + S.filter(s => s.t === 'island').map(s => el(s, th.ground)).join('')
+    + S.filter(s => s.t === 'bridge').map(s => el(s, C[3])).join('')
+    + S.filter(s => s.cls === 'solid').map(s => el(s, s.g === 'line' && s.t !== 'mound' ? C[2] : C[1])).join('');
+}
 function mapPreview(m) {
   const th = THEMES[m.theme] || THEMES.meadow;
+  const terrain = m.obstacles && m.obstacles.length ? `<clipPath id="mc-${m.id}"><rect width="160" height="90" rx="8"/></clipPath><g clip-path="url(#mc-${m.id})">${miniTerrain(m, th)}</g>` : '';
   const dots = (m.buildings || []).map(b => {
     const c = b.owner >= 0 ? teamColor(b.owner).main : '#efe8dc';
     const r = b.type === 'cattree' ? 7 : 4.5;
     return `<circle cx="${b.x / 10}" cy="${b.y / 10}" r="${r}" fill="${c}" stroke="rgba(0,0,0,.35)" stroke-width="1"/>`;
   }).join('');
-  return `<svg viewBox="0 0 160 90" class="map-svg"><rect width="160" height="90" rx="8" fill="${th.ground}"/><rect x="4" y="4" width="152" height="82" rx="6" fill="${th.ground2}" opacity=".5"/>${dots}</svg>`;
+  return `<svg viewBox="0 0 160 90" class="map-svg"><rect width="160" height="90" rx="8" fill="${th.ground}"/><rect x="4" y="4" width="152" height="82" rx="6" fill="${th.ground2}" opacity=".5"/>${terrain}${dots}</svg>`;
 }
 function mapPicker(root, selected, onPick, opts = {}) {
   const maps = [...MAPS, { id: 'random', name: 'Random Map', theme: 'meadow', size: '???', desc: 'A brand new battlefield every time.', buildings: [] }];

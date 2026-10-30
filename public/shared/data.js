@@ -37,8 +37,8 @@ export const BUILDINGS = {
   },
   tower: {
     name: 'Scratch Tower', icon: '🗼', maxLevel: 3,
-    desc: 'Flings hairballs at enemy cats walking past. Tough to capture.',
-    cap: [20, 30, 40], prod: [0, 0, 0], range: [175, 195, 215], fireEvery: [1.25, 0.95, 0.7], dmg: 1,
+    desc: 'Flings hairballs at enemy cats walking past. Each upgrade reaches much farther. Tough to capture.',
+    cap: [20, 30, 40], prod: [0, 0, 0], range: [175, 255, 340], fireEvery: [1.25, 0.95, 0.7], dmg: 1,
     upgradeCost: [15, 25], defense: 1.5, radius: [36, 38, 40],
   },
   forge: {
@@ -60,6 +60,8 @@ export const BUILDINGS = {
     upgradeCost: [], defense: 1.3, radius: [56], noConvert: true,
   },
 };
+// Prof. Purrcival's Auto-Turret spell bolts on a fixed-size hairball turret
+export const TURRET = { range: 195, fireEvery: 0.95 };
 // cost (in cats) to convert a building into another type (resets to level 1)
 export const CONVERT_COST = { cottage: 10, tower: 20, forge: 20, garden: 20 };
 
@@ -313,6 +315,50 @@ function mirror(half) {
   return out.map((b, i) => ({ id: i, x: b.x, y: b.y, type: b.type, level: b.level || 1, owner: b.owner ?? -1, count: b.count ?? 10 }));
 }
 
+// ---------------- Terrain ----------------
+// Obstacles cats must walk around (see shared/nav.js for the shapes). Like buildings, a map lists P0's half and
+// terrain() adds the point-symmetric copy for P1; center:true pieces are symmetric already and listed once.
+//   water: ponds, rivers, the sea (rooftop maps draw it as an alley drop)   island / bridge: walkable land over water
+//   mound / rock / gumdrop: raised lumps        hedge / wall: long barriers
+function terrain(half) {
+  const R = ([x, y]) => [WORLD_W - x, WORLD_H - y];
+  const out = [];
+  for (const o of half) {
+    const { center, ...s } = o;
+    out.push(s);
+    if (center) continue;
+    const m = { ...s };
+    if (m.poly) m.poly = m.poly.map(R);
+    if (m.pts) m.pts = m.pts.map(R);
+    if (m.x != null) { m.x = WORLD_W - m.x; m.y = WORLD_H - m.y; }
+    out.push(m);
+  }
+  return out;
+}
+// lumpy outline; sym = point-symmetric around its own centre (for pieces sitting on the map centre)
+function blobPoly(x, y, rx, ry, rough, sym) {
+  const rnd = mulberry32(((Math.round(x) * 73856093) ^ (Math.round(y) * 19349663)) >>> 0);
+  const ph = [rnd() * 6.283, rnd() * 6.283, rnd() * 6.283], H = sym ? [2, 4, 6] : [2, 3, 5], n = 22, pts = [];
+  for (let k = 0; k < n; k++) {
+    const u = k / n * Math.PI * 2;
+    const f = 1 + rough * (0.5 * Math.sin(H[0] * u + ph[0]) + 0.3 * Math.sin(H[1] * u + ph[1]) + 0.2 * Math.sin(H[2] * u + ph[2]));
+    pts.push([Math.round((x + Math.cos(u) * rx * f) * 10) / 10, Math.round((y + Math.sin(u) * ry * f) * 10) / 10]);
+  }
+  return pts;
+}
+const pond = (x, y, rx, ry = rx, a = 0) => ({ t: 'water', x, y, rx, ry, a });
+const sea = poly => ({ t: 'water', poly });
+const river = (pts, w) => ({ t: 'water', pts, w });
+const island = (x, y, rx, ry = rx) => ({ t: 'island', x, y, rx, ry });
+const bridge = (x1, y1, x2, y2, w = 90) => ({ t: 'bridge', pts: [[x1, y1], [x2, y2]], w });
+const mound = (x, y, rx, ry = rx * 0.8, rough = 0.16, sym = false) => ({ t: 'mound', poly: blobPoly(x, y, rx, ry, rough, sym) });
+const rock = (x, y, r) => ({ t: 'rock', poly: blobPoly(x, y, r, r * 0.85, 0.22, false) });
+const gumdrop = (x, y, rx, ry = rx * 0.8) => ({ t: 'gumdrop', poly: blobPoly(x, y, rx, ry, 0.08, false) });
+const ridge = (pts, w = 56) => ({ t: 'mound', pts, w });
+const hedge = (pts, w = 42) => ({ t: 'hedge', pts, w });
+const wall = (pts, w = 44) => ({ t: 'wall', pts, w });
+const C = o => ({ ...o, center: true });
+
 export const MAPS = [
   {
     id: 'meadow', name: 'Sunny Meadow', theme: 'meadow', size: 'Small', desc: 'A gentle first battlefield. Grab the strays and charge!',
@@ -390,7 +436,239 @@ export const MAPS = [
       { x: 800, y: 450, type: 'cattree', count: 50, center: true },
     ]),
   },
+  // ---- terrain maps: the road between two buildings can be much longer than the straight line
+  {
+    id: 'ponds', name: 'Lily Pad Lanes', theme: 'meadow', size: 'Medium', desc: 'Two long ponds split the meadow into three lanes.',
+    buildings: mirror([
+      { x: 170, y: 450, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 330, y: 215, type: 'cottage', count: 8 },
+      { x: 330, y: 685, type: 'cottage', count: 8 },
+      { x: 480, y: 450, type: 'cottage', count: 12 },
+      { x: 680, y: 130, type: 'cottage', count: 12 },
+      { x: 560, y: 775, type: 'tower', count: 14 },
+      { x: 800, y: 450, type: 'cottage', level: 2, count: 24, center: true },
+    ]),
+    obstacles: terrain([
+      pond(800, 285, 255, 68),
+      rock(215, 140, 34),
+    ]),
+  },
+  {
+    id: 'hedgerow', name: 'The Long Hedge', theme: 'meadow', size: 'Medium', desc: 'A hedge runs right across the middle. The only way over is all the way around.',
+    buildings: mirror([
+      { x: 520, y: 205, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 290, y: 250, type: 'cottage', count: 8 },
+      { x: 770, y: 120, type: 'cottage', count: 10 },
+      { x: 640, y: 345, type: 'cottage', count: 12 },
+      { x: 1080, y: 240, type: 'tower', count: 14 },
+      { x: 150, y: 450, type: 'cottage', count: 14 },
+    ]),
+    obstacles: terrain([
+      C(hedge([[340, 450], [1260, 450]], 46)),
+      rock(400, 110, 30),
+    ]),
+  },
+  {
+    id: 'molehills', name: 'Molehill Meadow', theme: 'meadow', size: 'Large', desc: 'The moles have been busy. Every road wiggles between dirt mounds.',
+    buildings: mirror([
+      { x: 160, y: 760, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 160, y: 500, type: 'cottage', count: 10 },
+      { x: 380, y: 640, type: 'cottage', count: 10 },
+      { x: 330, y: 290, type: 'tower', count: 18 },
+      { x: 590, y: 790, type: 'forge', count: 15 },
+      { x: 610, y: 480, type: 'cottage', level: 2, count: 20 },
+      { x: 560, y: 160, type: 'cottage', count: 12 },
+      { x: 780, y: 285, type: 'garden', count: 18 },
+    ]),
+    obstacles: terrain([
+      mound(268, 700, 58, 40),
+      mound(240, 395, 52, 58),
+      mound(492, 562, 62, 46),
+      mound(445, 222, 56, 44),
+      mound(600, 640, 70, 42),
+      mound(692, 385, 46, 40),
+      C(mound(800, 450, 82, 70, 0.16, true)),
+    ]),
+  },
+  {
+    id: 'moat', name: 'Moonlit Moat', theme: 'night', size: 'Medium', desc: 'The Grand Cat Tree sits on an island. One bridge each, so guard yours!',
+    buildings: mirror([
+      { x: 170, y: 450, type: 'cottage', level: 2, owner: 0, count: 22 },
+      { x: 330, y: 200, type: 'cottage', count: 10 },
+      { x: 330, y: 700, type: 'cottage', count: 10 },
+      { x: 480, y: 450, type: 'garden', count: 14 },
+      { x: 610, y: 135, type: 'tower', count: 16 },
+      { x: 570, y: 770, type: 'cottage', count: 16 },
+      { x: 800, y: 450, type: 'cattree', count: 45, center: true },
+    ]),
+    obstacles: terrain([
+      C(pond(800, 450, 215, 200)),
+      C(island(800, 450, 125, 112)),
+      bridge(560, 360, 720, 420, 92),
+      hedge([[430, 250], [470, 330]], 40),
+    ]),
+  },
+  {
+    id: 'archipelago', name: 'Cattail Archipelago', theme: 'beach', size: 'Large', desc: 'Island hopping! Every bridge is a chokepoint.',
+    buildings: mirror([
+      { x: 200, y: 450, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 235, y: 235, type: 'cottage', count: 8 },
+      { x: 235, y: 665, type: 'cottage', count: 8 },
+      { x: 570, y: 215, type: 'cottage', count: 12 },
+      { x: 570, y: 685, type: 'forge', count: 14 },
+      { x: 800, y: 450, type: 'cottage', level: 2, count: 26, center: true },
+    ]),
+    obstacles: terrain([
+      C(sea([[-60, -60], [1660, -60], [1660, 960], [-60, 960]])),
+      island(220, 450, 205, 330),
+      island(575, 215, 140, 115),
+      island(575, 685, 140, 115),
+      C(island(800, 450, 150, 128)),
+      bridge(345, 300, 480, 245),
+      bridge(345, 600, 480, 655),
+      bridge(655, 265, 735, 360),
+      bridge(660, 705, 940, 705, 86),
+    ]),
+  },
+  {
+    id: 'piers', name: 'Pier Pressure', theme: 'beach', size: 'Medium', desc: 'Two bays bite into the docks. Take the pier or walk round the long way.',
+    buildings: mirror([
+      { x: 180, y: 300, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 200, y: 650, type: 'cottage', count: 10 },
+      { x: 420, y: 470, type: 'cottage', count: 12 },
+      { x: 420, y: 170, type: 'cottage', count: 8 },
+      { x: 600, y: 620, type: 'tower', count: 16 },
+      { x: 900, y: 180, type: 'cottage', count: 14 },
+      { x: 800, y: 450, type: 'garden', count: 18, center: true },
+    ]),
+    obstacles: terrain([
+      sea([[555, -60], [785, -60], [770, 280], [740, 405], [665, 425], [595, 300]]),
+      bridge(520, 135, 815, 135, 84),
+      rock(330, 790, 36),
+    ]),
+  },
+  {
+    id: 'alleys', name: 'Alley Leap', theme: 'rooftop', size: 'Medium', desc: 'Two deep alleys and one plank across each. Zig-zag to victory.',
+    buildings: mirror([
+      { x: 210, y: 450, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 230, y: 190, type: 'cottage', count: 8 },
+      { x: 230, y: 710, type: 'cottage', count: 8 },
+      { x: 390, y: 450, type: 'forge', count: 14 },
+      { x: 700, y: 170, type: 'cottage', count: 12 },
+      { x: 690, y: 610, type: 'cottage', count: 14 },
+      { x: 800, y: 450, type: 'tower', count: 20, center: true },
+    ]),
+    obstacles: terrain([
+      river([[530, -60], [545, 300], [560, 600], [545, 960]], 78),
+      bridge(470, 205, 625, 205, 100),
+    ]),
+  },
+  {
+    id: 'chimneys', name: 'Chimney Switchback', theme: 'rooftop', size: 'Medium', desc: 'Brick walls drop from the sky. The road snakes down, across and up again.',
+    buildings: mirror([
+      { x: 200, y: 250, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 200, y: 650, type: 'cottage', count: 10 },
+      { x: 420, y: 460, type: 'cottage', count: 12 },
+      { x: 430, y: 150, type: 'tower', count: 14 },
+      { x: 470, y: 770, type: 'cottage', count: 12 },
+      { x: 760, y: 240, type: 'cottage', count: 14 },
+      { x: 800, y: 450, type: 'garden', count: 16, center: true },
+    ]),
+    obstacles: terrain([
+      wall([[600, -40], [600, 590]], 46),
+      rock(300, 450, 30),
+    ]),
+  },
+  {
+    id: 'fjord', name: 'Frozen Fjord', theme: 'snow', size: 'Large', desc: 'An icy river winds through the peaks. Only two bridges cross it.',
+    buildings: mirror([
+      { x: 200, y: 260, type: 'cottage', level: 2, owner: 0, count: 22 },
+      { x: 190, y: 620, type: 'cottage', count: 10 },
+      { x: 420, y: 430, type: 'cottage', count: 12 },
+      { x: 380, y: 130, type: 'cottage', count: 8 },
+      { x: 470, y: 770, type: 'forge', count: 14 },
+      { x: 640, y: 570, type: 'cottage', level: 2, count: 18 },
+      { x: 760, y: 800, type: 'tower', count: 16 },
+    ]),
+    obstacles: terrain([
+      C(river([[560, -60], [640, 180], [720, 330], [800, 450], [880, 570], [960, 720], [1040, 960]], 110)),
+      bridge(573, 257, 747, 163, 92),
+      mound(300, 440, 50, 38),
+      rock(560, 300, 34),
+    ]),
+  },
+  {
+    id: 'ridge', name: 'Snowdrift Ridge', theme: 'snow', size: 'Medium', desc: 'A great snowy ridge zig-zags across the peak. Neighbours are close, roads are long.',
+    buildings: mirror([
+      { x: 190, y: 520, type: 'cottage', level: 2, owner: 0, count: 22 },
+      { x: 210, y: 250, type: 'cottage', count: 8 },
+      { x: 400, y: 730, type: 'cottage', count: 10 },
+      { x: 520, y: 430, type: 'forge', count: 14 },
+      { x: 680, y: 565, type: 'cottage', count: 14 },
+      { x: 600, y: 105, type: 'tower', count: 16 },
+      { x: 840, y: 170, type: 'cottage', count: 12 },
+    ]),
+    obstacles: terrain([
+      C(ridge([[380, 185], [760, 300], [840, 600], [1220, 715]], 60)),
+    ]),
+  },
+  {
+    id: 'chocoriver', name: 'Chocolate River', theme: 'candy', size: 'Large', desc: 'A river of melted chocolate. Wafer bridges, gumdrop hills, sticky decisions.',
+    buildings: mirror([
+      { x: 200, y: 600, type: 'cottage', level: 2, owner: 0, count: 22 },
+      { x: 420, y: 790, type: 'cottage', count: 10 },
+      { x: 450, y: 470, type: 'cottage', count: 12 },
+      { x: 160, y: 390, type: 'cottage', count: 8 },
+      { x: 700, y: 700, type: 'forge', count: 14 },
+      { x: 640, y: 525, type: 'cottage', level: 2, count: 18 },
+      { x: 920, y: 795, type: 'tower', count: 16 },
+    ]),
+    obstacles: terrain([
+      C(river([[-60, 265], [300, 200], [600, 300], [800, 450], [1000, 600], [1300, 700], [1660, 635]], 100)),
+      C(bridge(857, 374, 743, 526, 92)),
+      bridge(300, 115, 300, 290, 90),
+      mound(320, 655, 46, 38),
+      mound(575, 640, 40, 34),
+    ]),
+  },
+  {
+    id: 'gumdrops', name: 'Gumdrop Ring', theme: 'candy', size: 'Medium', desc: 'A ring of giant gumdrops guards the Cat Tree. Slip through the gaps!',
+    buildings: mirror([
+      { x: 170, y: 450, type: 'cottage', level: 2, owner: 0, count: 22 },
+      { x: 330, y: 210, type: 'cottage', count: 10 },
+      { x: 330, y: 690, type: 'cottage', count: 10 },
+      { x: 500, y: 450, type: 'cottage', count: 14 },
+      { x: 600, y: 140, type: 'garden', count: 14 },
+      { x: 590, y: 770, type: 'tower', count: 16 },
+      { x: 800, y: 450, type: 'cattree', count: 48, center: true },
+    ]),
+    obstacles: terrain([
+      gumdrop(982, 540, 58, 48),
+      gumdrop(800, 630, 62, 46),
+      gumdrop(618, 540, 58, 48),
+      rock(200, 820, 30),
+    ]),
+  },
+  {
+    id: 'maze', name: 'Moonlit Maze', theme: 'night', size: 'Medium', desc: 'Hedges twist through the moonlit garden. Find the way in before they do.',
+    buildings: mirror([
+      { x: 180, y: 250, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 180, y: 690, type: 'cottage', count: 10 },
+      { x: 470, y: 230, type: 'cottage', count: 10 },
+      { x: 420, y: 465, type: 'forge', count: 14 },
+      { x: 680, y: 150, type: 'cottage', count: 12 },
+      { x: 640, y: 690, type: 'cottage', count: 14 },
+      { x: 800, y: 285, type: 'cottage', level: 2, count: 18 },
+    ]),
+    obstacles: terrain([
+      hedge([[370, 115], [370, 365], [570, 365]]),
+      hedge([[290, 565], [525, 565], [525, 780]]),
+      C(hedge([[700, 330], [700, 450], [900, 450], [900, 570]])),
+    ]),
+  },
 ];
+// map pickers list each theme's classic open map first, then its terrain maps
+{ const order = Object.keys(THEMES); MAPS.sort((a, b) => order.indexOf(a.theme) - order.indexOf(b.theme)); }
 export const MAP_BY_ID = Object.fromEntries(MAPS.map(m => [m.id, m]));
 
 // Seeded random symmetric map
@@ -411,7 +689,27 @@ export function randomMap(seed) {
     half.push({ x, y, type: t, count: 6 + Math.floor(rnd() * 14) });
   }
   if (rnd() < 0.5) half.push({ x: 800, y: 450, type: rnd() < 0.5 ? 'cattree' : 'cottage', level: 2, count: 30 + Math.floor(rnd() * 15), center: true });
-  return { id: 'random', name: 'Wild Lands #' + (seed % 1000), theme, size: 'Random', desc: 'A freshly generated battlefield.', buildings: mirror(half) };
+  return { id: 'random', name: 'Wild Lands #' + (seed % 1000), theme, size: 'Random', desc: 'A freshly generated battlefield.', buildings: mirror(half), obstacles: randomTerrain(rnd, theme, half) };
+}
+// A few lumps and ponds dropped between the buildings. Every piece keeps a wide gap to the buildings, the edges and
+// the other pieces, so no road is ever cut off.
+function randomTerrain(rnd, theme, half) {
+  if (rnd() < 0.3) return [];
+  const kinds = theme === 'rooftop' ? ['rock', 'mound', 'mound'] : theme === 'beach' ? ['pond', 'mound', 'rock'] : ['mound', 'pond', 'rock', 'mound'];
+  const blds = half.flatMap(b => [b, { x: WORLD_W - b.x, y: WORLD_H - b.y }]);
+  const placed = [], out = [];
+  const want = 2 + Math.floor(rnd() * 3);
+  for (let tries = 0; placed.length < want && tries < 400; tries++) {
+    const r = 42 + rnd() * 38, R = r * 1.25;
+    const x = 110 + R + rnd() * (WORLD_W / 2 - 110 - R), y = 110 + R + rnd() * (WORLD_H - 220 - 2 * R);
+    if (blds.some(b => Math.hypot(b.x - x, b.y - y) < R + 100)) continue;
+    if (Math.hypot(WORLD_W - 2 * x, WORLD_H - 2 * y) < 2 * R + 120) continue; // too close to its own mirror image
+    if (placed.some(o => Math.hypot(o.x - x, o.y - y) < o.R + R + 120 || Math.hypot(WORLD_W - o.x - x, WORLD_H - o.y - y) < o.R + R + 120)) continue;
+    placed.push({ x, y, R });
+    const k = kinds[Math.floor(rnd() * kinds.length)], X = Math.round(x), Y = Math.round(y);
+    out.push(k === 'pond' ? pond(X, Y, Math.round(r * 1.15), Math.round(r * 0.75), Math.round(rnd() * 10) / 10 - 0.5) : k === 'rock' ? rock(X, Y, Math.round(r * 0.75)) : mound(X, Y, Math.round(r), Math.round(r * 0.8)));
+  }
+  return terrain(out);
 }
 
 export function mulberry32(a) {
@@ -439,12 +737,12 @@ export const CAMPAIGN = [
   { id: 4,  name: 'Garden Party',      map: 'moonlit',  ai: 'normal', enemy: 'duchess',  reward: 130, tip: 'Gardens refill your catnip faster. Spells win battles!' },
   { id: 5,  name: 'Dockside Dash',     map: 'docks',    ai: 'normal', enemy: 'clawbeard',reward: 140, tip: 'Forges make all your cats hit harder.' },
   { id: 6,  name: 'Sugar Rush',        map: 'candy',    ai: 'normal', enemy: 'neko',     reward: 150, tip: 'The Grand Cat Tree is worth fighting for.' },
-  { id: 7,  name: 'Ninja Night',       map: 'moonlit',  ai: 'hard',   enemy: 'shadow',   reward: 170, tip: 'Swipe across several of your buildings to send from all of them at once.' },
-  { id: 8,  name: 'Chonk Wall',        map: 'snowy',    ai: 'hard',   enemy: 'chonk',    reward: 180, tip: 'Purr Power stars boost your whole army. Keep capturing!' },
-  { id: 9,  name: 'Space Race',        map: 'rooftops', ai: 'hard',   enemy: 'astro',    reward: 200, tip: 'Convert buildings to change their job.' },
-  { id: 10, name: 'Mad Science',       map: 'docks',    ai: 'hard',   enemy: 'purrcival',reward: 220, tip: 'Spread out so one area spell cannot hit everything.' },
-  { id: 11, name: 'Witching Hour',     map: 'candy',    ai: 'insane', enemy: 'luna',     reward: 250, tip: 'The enemy grows stronger. So do you.' },
-  { id: 12, name: 'The Keyboard King', map: 'meadow',   ai: 'insane', enemy: 'glitch',   reward: 400, tip: 'The final boss. Show them who the real top cat is!' },
+  { id: 7,  name: 'Ninja Night',       map: 'maze',     ai: 'hard',   enemy: 'shadow',   reward: 170, tip: 'Cats walk around hedges and ponds. Drag onto a building to see the road they will take.' },
+  { id: 8,  name: 'Chonk Wall',        map: 'ridge',    ai: 'hard',   enemy: 'chonk',    reward: 180, tip: 'Purr Power stars boost your whole army. Keep capturing!' },
+  { id: 9,  name: 'Space Race',        map: 'alleys',   ai: 'hard',   enemy: 'astro',    reward: 200, tip: 'Swipe across several of your buildings to send from all of them at once.' },
+  { id: 10, name: 'Mad Science',       map: 'archipelago', ai: 'hard', enemy: 'purrcival',reward: 220, tip: 'Bridges are chokepoints. Spread out so one area spell cannot hit everything.' },
+  { id: 11, name: 'Witching Hour',     map: 'chocoriver', ai: 'insane', enemy: 'luna',   reward: 250, tip: 'The enemy grows stronger. So do you. Convert buildings to change their job.' },
+  { id: 12, name: 'The Keyboard King', map: 'hedgerow', ai: 'insane', enemy: 'glitch',   reward: 400, tip: 'The final boss. Show them who the real top cat is!' },
 ];
 
 // ---------------- Achievements ----------------

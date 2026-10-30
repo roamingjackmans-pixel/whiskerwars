@@ -1,6 +1,7 @@
 // Whisker Wars renderer: draws the battlefield, cats, effects and drag/targeting overlays.
-import { WORLD_W, WORLD_H, BUILDINGS, THEMES, teamColor, findSpell } from '../shared/data.js';
+import { WORLD_W, WORLD_H, BUILDINGS, THEMES, TURRET, teamColor, findSpell } from '../shared/data.js';
 import { BFX, SFX } from '../shared/game.js';
+import { getNav, transformObstacles } from '../shared/nav.js';
 import * as art from './art.js';
 
 const BIT = {}; BFX.forEach((n, i) => { BIT['b_' + n] = 1 << i; }); SFX.forEach((n, i) => { BIT['s_' + n] = 1 << i; });
@@ -70,14 +71,19 @@ export class Renderer {
     this.theme = info.map.theme || 'meadow';
     this.seed = info.map.seed || 1;
     this.players = info.players;
+    // the same walking routes the simulation uses, for drag arrows and the trails painted on the ground
+    try { this.nav = getNav({ buildings: info.buildings, obstacles: info.map.obstacles || [] }); } catch (e) { console.error('nav', e); this.nav = null; }
     this.setView(view);
   }
   setView(view) {
     const fwd = view ? view.fwd : (x, y) => ({ x, y });
+    this.fwd = fwd;
+    this.routeCache = new Map();
     this.VW = view ? view.w : WORLD_W; this.VH = view ? view.h : WORLD_H;
     this.bpos = new Map(this.info.buildings.map(b => { const p = fwd(b.x, b.y); return [b.id, { ...b, x: p.x, y: p.y }]; }));
     const pts = [...this.bpos.values()];
     this.bgInfo = pts.map(b => ({ x: b.x, y: b.y, radius: 44 }));
+    this.terrain = { shapes: transformObstacles(this.info.map.obstacles || [], fwd), trails: this.trailRoutes() };
     if (view && view.fit && pts.length) {
       // zoom onto the buildings (room above for art + prediction pill, below for count badges)
       const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
@@ -94,9 +100,37 @@ export class Renderer {
   }
   buildBackground() {
     const s = Math.min(this.view.scale * this.dpr, 2.2);
-    try { this.bg = art.renderBackground(this.theme, this.seed, this.bgInfo || [], s, this.VW, this.VH); }
+    try { this.bg = art.renderBackground(this.theme, this.seed, this.bgInfo || [], s, this.VW, this.VH, this.terrain); }
     catch (e) { console.error('bg', e); this.bg = null; }
     this.bgScale = s;
+  }
+  /** Walking route between two buildings in view coordinates (start and end included). */
+  routeView(fromId, toId) {
+    if (!this.nav) return null;
+    const key = fromId + ':' + toId;
+    let r = this.routeCache.get(key);
+    if (!r) {
+      const w = this.nav.fullPath(fromId, toId);
+      if (!w || w.length < 2) return null;
+      r = w.map(p => this.fwd(p.x, p.y));
+      this.routeCache.set(key, r);
+    }
+    return r;
+  }
+  /** Trails on the ground: each building to its two nearest neighbours (by walking distance), along the real route. */
+  trailRoutes() {
+    if (!this.nav) return null;
+    const ids = this.info.buildings.map(b => b.id), seen = new Set(), out = [];
+    for (const a of ids) {
+      const near = ids.filter(b => b !== a).map(b => [b, this.nav.len(a, b)]).sort((p, q) => p[1] - q[1]).slice(0, 2);
+      for (const [b, d] of near) {
+        const k = Math.min(a, b) + ':' + Math.max(a, b);
+        if (seen.has(k) || d > 640) continue;
+        seen.add(k);
+        out.push(this.nav.fullPath(a, b).map(p => this.fwd(p.x, p.y)));
+      }
+    }
+    return out;
   }
   toWorld(sx, sy) { return { x: (sx - this.view.ox) / this.view.scale, y: (sy - this.view.oy) / this.view.scale }; }
   toScreen(wx, wy) { return { x: wx * this.view.scale + this.view.ox, y: wy * this.view.scale + this.view.oy }; }
@@ -311,7 +345,7 @@ export class Renderer {
     const hb = show != null ? byId.get(show) : null;
     if (hb && (BUILDINGS[hb.type].range || has(hb.fx, 'b_turret'))) {
       const def = BUILDINGS[hb.type];
-      const range = def.range ? def.range[hb.level - 1] : BUILDINGS.tower.range[1];
+      const range = def.range ? def.range[hb.level - 1] : TURRET.range;
       ctx.save();
       ctx.setLineDash([10, 8]); ctx.lineDashOffset = -t * 20;
       ctx.strokeStyle = teamColor(hb.owner).main; ctx.globalAlpha = 0.6; ctx.lineWidth = 2.5;
@@ -348,7 +382,10 @@ export class Renderer {
       for (const id of ui.sources) {
         const b = byId.get(id);
         if (!b || b.id === ui.target) continue;
-        this.arrow(ctx, b.x, b.y - b.radius * 0.3, tx, ty - (tb ? tb.radius * 0.3 : 0), col, t, !!tb);
+        // locked onto a target: show the road the cats will actually walk
+        const route = tb ? this.routeView(b.id, tb.id) : null;
+        if (route && route.length > 2) this.routeArrow(ctx, route, b, tb, col, t);
+        else this.arrow(ctx, b.x, b.y - b.radius * 0.3, tx, ty - (tb ? tb.radius * 0.3 : 0), col, t, !!tb);
       }
       if (ui.prediction && tb) {
         const p = ui.prediction;
@@ -400,6 +437,40 @@ export class Renderer {
         }
       }
     }
+  }
+  routeArrow(ctx, route, from, to, col, t) {
+    const pts = route.map(p => ({ x: p.x, y: p.y }));
+    pts[0] = { x: from.x, y: from.y - from.radius * 0.3 };
+    const n = pts.length;
+    pts[n - 1] = { x: to.x, y: to.y - to.radius * 0.3 };
+    // stop a little short of the target so the head sits in front of it
+    const a = pts[n - 2], z = pts[n - 1], dl = Math.hypot(z.x - a.x, z.y - a.y) || 1;
+    const cut = Math.min(to.radius * 0.55, dl * 0.5);
+    const end = { x: z.x - (z.x - a.x) / dl * cut, y: z.y - (z.y - a.y) / dl * cut };
+    pts[n - 1] = end;
+    const trace = oy => {
+      ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y + oy);
+      for (let k = 1; k < n - 1; k++) {
+        const p = pts[k], q = pts[k + 1];
+        ctx.quadraticCurveTo(p.x, p.y + oy, (p.x + q.x) / 2, (p.y + q.y) / 2 + oy);
+      }
+      ctx.lineTo(end.x, end.y + oy);
+    };
+    ctx.save();
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 9; trace(3); ctx.stroke();
+    ctx.strokeStyle = col.light; ctx.lineWidth = 6;
+    ctx.setLineDash([14, 10]); ctx.lineDashOffset = -t * 60;
+    trace(0); ctx.stroke();
+    ctx.setLineDash([]);
+    const ux = (end.x - a.x) / (Math.hypot(end.x - a.x, end.y - a.y) || 1), uy = (end.y - a.y) / (Math.hypot(end.x - a.x, end.y - a.y) || 1);
+    ctx.fillStyle = col.light;
+    ctx.beginPath();
+    ctx.moveTo(end.x + ux * 6, end.y + uy * 6);
+    ctx.lineTo(end.x - ux * 16 - uy * 11, end.y - uy * 16 + ux * 11);
+    ctx.lineTo(end.x - ux * 16 + uy * 11, end.y - uy * 16 - ux * 11);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
   }
   arrow(ctx, x0, y0, x1, y1, col, t, locked) {
     const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy);
@@ -453,6 +524,7 @@ export class Renderer {
         if (e.o === this.me) this.text(b.x, b.y - b.radius * 2, 'CAPTURED!', '#fff', 20, c.dark, 1.3);
         else if (e.prev === this.me) this.text(b.x, b.y - b.radius * 2, 'LOST!', '#fff', 20, '#a01d2c', 1.3);
         if (e.bonus) this.text(b.x, b.y - b.radius * 2.6, `🍀 +${e.bonus}`, '#fff', 16, '#2f8a3a', 1.2);
+        if (e.down) this.text(b.x, b.y + b.radius * 0.2, `▼ Level ${e.down}`, '#fff', 14, '#6a4a3a', 1.4);
         this.shake = Math.max(this.shake, e.o === this.me || e.prev === this.me ? 5 : 2);
         break;
       }

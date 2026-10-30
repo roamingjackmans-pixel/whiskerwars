@@ -1,7 +1,7 @@
 // Whisker Wars - computer opponent. Runs on the authority, issues normal commands.
 import { BUILDINGS, AI_LEVELS, BASE_SPEED } from './data.js';
 
-const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+// buildings are compared by how far a cat has to WALK (around ponds, walls and mounds), not as the crow flies
 
 const AREA_ENEMY = { meteor: 9, frost: 9, bellyflop: 7, mutiny: 12, zerog: 9, tractor: 10, laser: 9, vacuum: 10 };
 
@@ -59,7 +59,7 @@ export class AI {
     let dm = Infinity, de = Infinity;
     for (const o of g.buildings) {
       if (o === b) continue;
-      const d = dist(o, b);
+      const d = g.pathLen(o, b);
       if (o.owner === this.i) dm = Math.min(dm, d); else if (o.owner >= 0) de = Math.min(de, d);
     }
     return de < 380;
@@ -70,7 +70,7 @@ export class AI {
     for (const b of this.threatened) {
       let need = (3 - b._margin) / g.defense(b) + 2;
       const helpers = mine.filter(h => h !== b && !this.threatened.includes(h) && h.count > 5 && !g.fx(h, 'stink'))
-        .sort((a, c) => dist(a, b) - dist(c, b));
+        .sort((a, c) => g.pathLen(a, b) - g.pathLen(c, b));
       for (const h of helpers) {
         if (need <= 0) break;
         const take = Math.min(h.count - 3, need);
@@ -98,17 +98,18 @@ export class AI {
     }
   }
 
+  /** Roughly how many cats enemy towers will knock out of a squad walking this route. */
   towerLoss(from, to) {
     const g = this.g;
+    const route = g.nav.fullPath(from.id, to.id);
     let shots = 0;
     for (const t of g.buildings) {
       const def = BUILDINGS[t.type];
       if (!def.range || t.owner < 0 || t.owner === this.i || t.count < 1 || t === to) continue;
       const range = def.range[t.level - 1];
-      const d = segDist(t, from, to);
-      if (d >= range) continue;
-      const chord = Math.min(2 * Math.sqrt(range * range - d * d), dist(from, to));
-      shots += chord / BASE_SPEED / def.fireEvery[t.level - 1];
+      let inRange = 0;
+      for (let k = 1; k < route.length; k++) inRange += chordIn(t, range, route[k - 1], route[k]);
+      shots += inRange / BASE_SPEED / def.fireEvery[t.level - 1];
     }
     return shots;
   }
@@ -127,7 +128,7 @@ export class AI {
       if (tg.owner === me) continue;
       const srcs = mine
         .filter(b => !this.threatened.includes(b) && !g.fx(b, 'stink'))
-        .map(b => ({ b, d: dist(b, tg), avail: b.count - this.reserve(b) }))
+        .map(b => ({ b, d: g.pathLen(b, tg), avail: b.count - this.reserve(b) }))
         .filter(x => x.avail >= 2)
         .sort((a, c) => (a.b.id === this.preferSource ? -1 : 0) - (c.b.id === this.preferSource ? -1 : 0) || a.d - c.d);
       if (!srcs.length) continue;
@@ -144,6 +145,9 @@ export class AI {
         const already = [...g.squads].filter(q => q.owner === me && q.to === tg.id).reduce((a, q) => a + q.count, 0);
         let need = ((tg.count + prod + theirReinf) * def / atk) * (1.12 + (1 - aggr) * 0.35) + 2 + this.towerLoss(s.b, tg) - already;
         if (Math.random() < this.L.mistakes) need *= 0.7;
+        // cats already on the way (nearly) cover it: don't drip-feed tiny squads in after them. Trickles get eaten
+        // one by one while the defender tops up, and on long roads that can go on for the whole match.
+        if (already > 0 && need < 5) break;
         if (gathered >= need) {
           options.push({ tg, used: used.slice(), need: Math.max(need, 1), maxD });
           break;
@@ -267,13 +271,13 @@ export class AI {
       }
       case 'polymorph': {
         const c = notMine.filter(x => ['tower', 'forge', 'garden'].includes(x.type) && !(x.owner >= 0 && g.fx(x, 'firewall')));
-        const b = maxBy(c, x => (x.owner >= 0 ? 10 : 0) - Math.min(...mine.map(m => dist(m, x))) / 100);
+        const b = maxBy(c, x => (x.owner >= 0 ? 10 : 0) - Math.min(...mine.map(m => g.pathLen(m, x))) / 100);
         return b ? { b: b.id } : null;
       }
       case 'beckon': { const b = maxBy(notMine, x => x.count); return b && b.count >= 14 ? { b: b.id } : null; }
       case 'bribe': {
         const c = g.buildings.filter(x => x.owner < 0 && x.count <= sp.max && x.count >= 8);
-        const b = maxBy(c, x => this.value(x) * x.count - Math.min(...mine.map(m => dist(m, x))) / 50);
+        const b = maxBy(c, x => this.value(x) * x.count - Math.min(...mine.map(m => g.pathLen(m, x))) / 50);
         return b ? { b: b.id } : null;
       }
       case 'rally': case 'grog': {
@@ -293,10 +297,15 @@ export class AI {
   }
 }
 
-function segDist(p, a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y;
-  const L2 = dx * dx + dy * dy || 1;
-  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(a.x + dx * t - p.x, a.y + dy * t - p.y);
+/** Length of segment a-b that lies within distance r of point c. */
+function chordIn(c, r, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  if (L2 < 1e-6) return 0;
+  const fx = a.x - c.x, fy = a.y - c.y;
+  const B = (fx * dx + fy * dy) / L2, C = (fx * fx + fy * fy - r * r) / L2;
+  const disc = B * B - C;
+  if (disc <= 0) return 0;
+  const sq = Math.sqrt(disc);
+  const t0 = Math.max(0, -B - sq), t1 = Math.min(1, -B + sq);
+  return t1 > t0 ? (t1 - t0) * Math.sqrt(L2) : 0;
 }

@@ -23,7 +23,8 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | Fun modifiers | Zoomies (fast cats), Catnip Frenzy, Kitten Boom, Big Start — toggle in the lobby or practice setup |
 | 12 heroes | 4 clans, each hero has a passive + 3 spells (36 spells), unlocked with fish coins earned by playing |
 | 5 building types | Kitten Cottage (5 levels), Scratch Tower, Yarn Forge, Catnip Garden, Grand Cat Tree. Upgrade or convert any time |
-| Core mechanics | Drag-to-send, swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy |
+| Maps | 19 maps: 6 open fields and 13 with terrain (ponds, rivers, islands joined by bridges, hedges, walls, snow ridges, dirt mounds) that make cats walk the long way round. Random maps get lumps and ponds too. Every map is point-symmetric, and both sides' roads are identical |
+| Core mechanics | Drag-to-send (the arrow shows the road your cats will take), swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy. A building taken from the other player drops one upgrade level |
 | Solo | 12-level campaign with 3-star ratings, practice vs 4 AI difficulties, live AI battle on the menu background |
 | Progression | Coins, XP & levels, daily gift, first-win bonus, 13 achievements, 15 furs + 12 hats (your whole army wears them), match history |
 | Polish | Procedural art, synthesized music & SFX, spell VFX, screen shake, keyboard shortcuts |
@@ -71,6 +72,8 @@ window.WW_CONFIG = { server: 'wss://your-server.onrender.com/ws', peerPrefix: 'w
 
 ```bash
 node tools/simtest.mjs 40     # AI-vs-AI crash test on all maps
+node tools/maptest.mjs        # every map: clear ground under buildings, every road walkable, fair to both sides
+node tools/maptest.mjs ridge  # ...and draws the named map(s) as text
 node tools/balance.mjs        # round-robin hero win rates (both sides Hard AI)
 node tools/probe.mjs duchess  # one hero vs everyone (add a spell id or "passive" to disable it)
 node tools/relaytest.mjs      # tests the WebSocket relay (server must be running)
@@ -79,14 +82,15 @@ node tools/lobbytest.mjs      # tests the lobby/match message protocol in memory
 ```
 
 Add `?p2p` to the page URL to force peer-to-peer mode even when the server is available.
-`public/dev/art-test.html` and `public/dev/audio-test.html` are preview pages for the art and sound.
+`public/dev/art-test.html` and `public/dev/audio-test.html` are preview pages for the art and sound,
+and `public/dev/maps.html` shows every map's real background (also stood up the way phones see it).
 
 ## Project layout
 
 ```
 public/            the game (deploy this folder for static hosting)
   index.html, config.js, css/style.css
-  shared/          data.js (heroes, spells, buildings, maps), game.js (simulation), ai.js
+  shared/          data.js (heroes, spells, buildings, maps), game.js (simulation), ai.js, nav.js (terrain + roads)
   js/              main, ui (menus), match (game loop/input), render, hud, art, audio, net, online, profile
   vendor/          peerjs.min.js
 server/index.js    static file server + WebSocket room relay

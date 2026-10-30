@@ -1,7 +1,7 @@
 // Whisker Wars match controller: runs/receives the simulation, handles input, feeds renderer + HUD.
 import { Game, radiusOf, BFX, SFX } from '../shared/game.js';
 import { AI } from '../shared/ai.js';
-import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, WORLD_W, WORLD_H } from '../shared/data.js';
+import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, BASE_SPEED, WORLD_W, WORLD_H } from '../shared/data.js';
 import { Renderer, spellTargetOk } from './render.js';
 import { Hud } from './hud.js';
 import { audio } from './audio.js';
@@ -361,6 +361,15 @@ export class Match {
     if (this.myHero().passive.id === 'chivalry') a *= 1.1;
     return a;
   }
+  estSpeed(V) {
+    const P = V.players[this.me];
+    const pas = this.myHero().passive.id;
+    let v = BASE_SPEED * (1 + (P ? P.stars * PURR_SPD_PER_STAR : 0));
+    if (pas === 'lightpaws') v *= 1.2;
+    if (pas === 'starcharts') v *= 1.08;
+    if (this.info.rules && this.info.rules.zoomies) v *= 1.5;
+    return v;
+  }
   estDefense(b) {
     let d = BUILDINGS[b.type].defense;
     if (b.fx & BBIT('fortify')) d *= 1.5;
@@ -376,11 +385,22 @@ export class Match {
     if (ui.sources.length && ui.target != null) {
       const tb = V.byId.get(ui.target);
       if (tb) {
-        let n = 0;
-        for (const id of ui.sources) { if (id === tb.id) continue; const b = V.byId.get(id); if (b) n += Math.floor(b.count * this.pct); }
+        let n = 0, walk = 0;
+        const nav = this.renderer.nav;
+        for (const id of ui.sources) {
+          if (id === tb.id) continue;
+          const b = V.byId.get(id);
+          if (b) { n += Math.floor(b.count * this.pct); if (nav) walk = Math.max(walk, nav.len(id, tb.id)); }
+        }
         if (tb.owner === this.me) ui.prediction = { text: `+${n} 🐾`, neutral: true };
         else {
-          const need = tb.count * this.estDefense(tb) / this.estAttack(V);
+          // an enemy building keeps making kittens while your cats walk the long way round
+          let defenders = tb.count;
+          if (tb.owner >= 0) {
+            const prod = BUILDINGS[tb.type].prod[tb.level - 1] || 0;
+            if (prod > 0 && tb.count < tb.cap) defenders = Math.min(tb.cap, tb.count + prod * walk / this.estSpeed(V));
+          }
+          const need = defenders * this.estDefense(tb) / this.estAttack(V);
           const good = n > need + 0.3;
           ui.prediction = { text: `${n} ⚔ ${Math.ceil(need)}${good ? ' ✔' : ''}`, good };
         }
