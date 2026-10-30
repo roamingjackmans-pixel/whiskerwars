@@ -184,16 +184,27 @@ class HostConn extends Conn {
 
 /**
  * The host listens on every message server for relayed players. accept(conn) is called with each new one,
- * right before their hello is delivered on it.
+ * right before their first message is delivered on it. opens(m) says which first messages start a connection.
+ * listen = false keeps the server connections (for a RelayDialer) without taking any players.
  */
 export class RelayHost {
-  constructor(code, accept) {
+  constructor(code, accept, opens = m => OPENERS.has(m.t), listen = true) {
     this.code = code;
     this.accept = accept;
+    this.opens = opens;
+    this.listening = listen;
     this.hs = rid(8);
     this.links = new Set();
     this.conns = new Map();
+    this.extra = [];         // more topics to listen on (see listen())
+    this.onOther = null;     // (link, topic, text) for messages on those topics
     this.stopped = false;
+  }
+
+  /** Also listen on another topic, on every server (now and after reconnecting); messages go to onOther. */
+  listen(topic) {
+    this.extra.push(topic);
+    for (const l of this.links) l.subscribe(topic).catch(() => { });
   }
 
   start() {
@@ -223,14 +234,16 @@ export class RelayHost {
     if (this.stopped) return;
     let again = false;
     const retry = (ms, n) => { if (again || this.stopped) return; again = true; setTimeout(() => this._keep(broker, n), ms); };
-    const link = new Link(broker, (l, t, p) => this._up(l, p), l => {
+    const mine = hostTopic(this.code);
+    const link = new Link(broker, (l, t, p) => (t === mine ? this._up(l, p) : this.onOther && this.onOther(l, t, p)), l => {
       this.links.delete(l);
       for (const [id, c] of this.conns) if (c.link === l) { c._gone(); this.conns.delete(id); }
       retry(2000, 0);
     });
     try {
       await link.connect();
-      await link.subscribe(hostTopic(this.code));
+      if (this.listening) await link.subscribe(mine);
+      for (const t of this.extra) await link.subscribe(t);
       if (this.stopped) { link.close(); return; }
       this.links.add(link);
     } catch {
@@ -248,14 +261,14 @@ export class RelayHost {
     let c = this.conns.get(msg.c);
     if (!c) {
       const m = msg.m;
-      if (msg.bye || !m || !OPENERS.has(m.t)) return;
+      if (msg.bye || !m || typeof m !== 'object' || !this.opens(m)) return;
       c = new HostConn(this, link, msg.c);
       this.conns.set(msg.c, c);
       this.accept(c);
     } else if (c.link !== link) return;                    // the same hello sent through another server
     c.seen = Date.now();
     if (msg.bye) { c._gone(); this.conns.delete(msg.c); }
-    else c._data(msg.m);
+    else if (msg.m !== undefined) c._data(msg.m);     // (nothing but c and hs: a keep-alive)
   }
 
   _down(c, body) {
@@ -341,6 +354,69 @@ export class RelayGuest extends Conn {
     if (msg.hs !== this.hs || link !== this.link) return;
     this._lastIn = Date.now();
     if (msg.bye) this._gone();
+    else this._data(msg.m);
+  }
+}
+
+/**
+ * Short conversations with many hosts over one set of server connections: the friends list uses it to see
+ * who is online and to send invites. It shares a RelayHost's connections, so asking costs one message, not
+ * new connections. Answers come back on <root>/<their code>/g/<our id>/<n>, all caught by one subscription.
+ */
+export class RelayDialer {
+  constructor(hub) {
+    this.hub = hub;
+    this.id = rid(10);
+    this.n = 0;
+    this.calls = new Map();
+    hub.onOther = (link, topic, text) => {
+      const c = this.calls.get(topic.slice(topic.indexOf('/g/') + 3));
+      if (c) c._downMsg(link, text);
+    };
+    hub.listen(`${ROOT}+/g/${this.id}/#`);
+  }
+  get ready() { return this.hub.links.size > 0; }
+  /** Start a conversation with whoever listens on `code`: hello(m) says the first thing. */
+  dial(code) {
+    const c = new DialConn(this, code, `${this.id}/${++this.n}`);
+    this.calls.set(c.id, c);
+    return c;
+  }
+}
+
+class DialConn extends Conn {
+  constructor(dialer, code, id) { super(); this.dialer = dialer; this.code = code; this.id = id; this.hs = null; this.link = null; this._closed = false; }
+  /** Say the first thing on every server, and again every 2 s until someone answers. */
+  hello(m) {
+    const say = () => { for (const l of this.dialer.hub.links) l.publish(hostTopic(this.code), JSON.stringify({ c: this.id, m })); };
+    say();
+    this._again = setInterval(() => { if (this.hs || this._closed) clearInterval(this._again); else say(); }, 2000);
+  }
+  send(m) { if (this.open && this.link) this.link.publish(hostTopic(this.code), JSON.stringify({ c: this.id, hs: this.hs, m })); }
+  close() {
+    if (this._closed) return;
+    if (this.open && this.link) this.link.publish(hostTopic(this.code), JSON.stringify({ c: this.id, hs: this.hs, bye: 1 }));
+    this._end();
+  }
+  _end() {
+    this._closed = true;
+    clearInterval(this._again); clearInterval(this._ka);
+    this.dialer.calls.delete(this.id);
+    this._gone();
+  }
+  _downMsg(link, text) {
+    if (this._closed) return;
+    let msg;
+    try { msg = JSON.parse(text); } catch { return; }
+    if (!msg || typeof msg !== 'object' || typeof msg.hs !== 'string') return;
+    if (!this.hs) {
+      this.hs = msg.hs; this.link = link; this.open = true;
+      clearInterval(this._again);
+      // while we wait (for an invite answer, say), let them know we're still here
+      this._ka = setInterval(() => { if (this.open) this.link.publish(hostTopic(this.code), JSON.stringify({ c: this.id, hs: this.hs })); }, 4000);
+    }
+    if (msg.hs !== this.hs || link !== this.link) return;
+    if (msg.bye) this._end();
     else this._data(msg.m);
   }
 }

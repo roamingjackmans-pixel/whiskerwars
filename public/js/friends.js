@@ -4,13 +4,21 @@
 // PeerJS "presence" peer open (id: <peerPrefix>friend-<friendCode>). Seeing whether a friend is online means
 // trying to reach their presence peer; an invite is a short message over that connection carrying a room code,
 // which the friend then joins the normal way.
+//
+// Some phones can't make direct connections, so everyone also listens on the backup relay (relay.js, topic
+// f<friendCode>). Online checks ask both ways at once; invites try direct first and use the relay if that
+// fails, so nobody gets the same invite twice. A phone that can't reach the PeerJS service at all still
+// works through the relay alone.
 import { profile, save } from './profile.js';
+import { RelayHost, RelayDialer } from './relay.js';
 
 const MAX_FRIENDS = 40;
 const CHECK_EVERY = 25000;       // re-check who is online this often while the friends list is on screen
 const INVITE_WAIT = 45000;       // an unanswered invite expires after this long
 const cfg = () => window.WW_CONFIG || {};
 const prefix = () => (cfg().peerPrefix || 'whiskerwars-v1-') + 'friend-';
+// ?forcerelay in the page address: act like a phone that can't use PeerJS at all (relay only), for testing
+const FORCE_RELAY = typeof location !== 'undefined' && /[?&]forcerelay\b/.test(location.search);
 
 // ---------------- the friend list (saved in the profile) ----------------
 export function cleanFriendCode(s) { return String(s || '').replace(/\D/g, '').slice(0, 8); }
@@ -86,20 +94,33 @@ class Presence {
     this.pending = new Map();        // friend code -> callbacks for a connection attempt in flight
     this.timer = null;
     this.asked = new Set();
+    this.hub = null;                 // our ear on the relay (and the server connections the dialer shares)
+    this.dialer = null;
+    this.viaRelay = new Set();       // friends who last answered through the relay: invite them that way first
   }
   get ready() { return !!this.peer && !this.peer.destroyed && this.peer.open; }
 
-  /** Open our presence peer (once). Resolves when we can talk to friends. */
+  /** Open our presence peer (once) and our ear on the relay. Resolves when we can talk to friends. */
   start() {
     if (this.ready) return Promise.resolve(true);
     if (this.starting) return this.starting;
-    if (!window.Peer) return Promise.resolve(false);
+    // no PeerJS here (or it failed a moment ago): the relay alone will do
+    if (!window.Peer || FORCE_RELAY || (this.hub && Date.now() - (this.peerFailed || 0) < 120000)) { this.startRelay(true); return Promise.resolve(true); }
     this.starting = this.open(prefix() + myFriendCode())
-      .then(() => { this.reachable = true; return true; })
-      .catch(e => (e && e.type === 'unavailable-id' ? this.open(null).then(() => true) : false))
-      .catch(() => false)
+      .then(() => { this.reachable = true; this.startRelay(true); return true; })
+      // another tab of ours is already reachable: just talk from this one
+      .catch(e => (e && e.type === 'unavailable-id' ? this.open(null).then(() => { this.startRelay(false); return true; }) : Promise.reject(e)))
+      // no PeerJS service from here: the relay alone still works
+      .catch(() => { this.peerFailed = Date.now(); this.startRelay(true); return true; })
       .finally(() => { this.starting = null; emit('change'); });
     return this.starting;
+  }
+  /** listen: answer friends on the relay too (only the tab that owns our presence, so invites don't pop up twice) */
+  startRelay(listen) {
+    if (this.hub) return;
+    this.hub = new RelayHost('f' + myFriendCode(), conn => this.incoming(conn), m => m.type === 'hello' || m.type === 'invite', listen);
+    this.dialer = new RelayDialer(this.hub);
+    this.hub.start();
   }
   open(id) {
     return new Promise((resolve, reject) => {
@@ -120,29 +141,67 @@ class Presence {
         // "Could not connect to peer <id>": that friend is not online
         if (e && e.type === 'peer-unavailable') {
           const m = /friend-(\d{8})/.exec(String(e.message || ''));
-          if (m && this.pending.has(m[1])) this.pending.get(m[1]).fail('offline');
+          if (m && this.pending.has(m[1])) this.pending.get(m[1]).unreachable();
         }
       });
     });
   }
-  stop() { clearInterval(this.timer); this.timer = null; try { this.peer && this.peer.destroy(); } catch { } this.peer = null; this.reachable = false; }
+  stop() {
+    clearInterval(this.timer); this.timer = null;
+    try { this.peer && this.peer.destroy(); } catch { }
+    try { this.hub && this.hub.stop(); } catch { }
+    this.peer = null; this.hub = null; this.dialer = null; this.reachable = false;
+  }
 
   setStatus(code, state) { this.status.set(code, { state, at: Date.now() }); emit('change'); }
 
-  /** Connect to a friend, send `msg` and wait for the first reply. Rejects with 'offline' if they are not around. */
-  talk(code, msg, wait = 9000) {
+  /**
+   * Reach a friend, send `msg` and wait for the first reply. Rejects with 'offline' if they are not around.
+   * both = ask directly and through the relay at the same time (fine for "are you there?"); otherwise direct
+   * first, and the relay only if that fails or is slow (so an invite never arrives twice).
+   */
+  talk(code, msg, wait = 9000, both = false) {
     return this.start().then(ok => new Promise((resolve, reject) => {
-      if (!ok || !this.ready) return reject('offline');
+      if (!ok) return reject('offline');
       if (this.pending.has(code)) this.pending.get(code).fail('superseded');
-      const conn = this.peer.connect(prefix() + code, { reliable: true, serialization: 'json' });
-      let done = false;
-      const finish = (fn, v) => { if (done) return; done = true; clearTimeout(t); this.pending.delete(code); fn(v); };
-      const t = setTimeout(() => { finish(reject, 'offline'); try { conn.close(); } catch { } }, wait);
-      this.pending.set(code, { fail: why => { finish(reject, why); try { conn.close(); } catch { } }, conn });
-      conn.on('open', () => conn.send(msg));
-      conn.on('data', d => finish(resolve, { reply: d, conn }));
-      conn.on('error', () => finish(reject, 'offline'));
-      conn.on('close', () => finish(reject, 'offline'));
+      const relayUp = () => !!this.dialer && this.dialer.ready;
+      let done = false, direct = null, relay = null, opened = false, gone = false, slow = 0;
+      const finish = (fn, v, keep) => {
+        if (done) return;
+        done = true; clearTimeout(t); clearTimeout(slow); this.pending.delete(code);
+        for (const c of [direct, relay]) if (c && c !== keep) { try { c.close(); } catch { } }
+        fn(v);
+      };
+      let t = setTimeout(() => finish(reject, 'offline'), wait);
+      const shorten = ms => { clearTimeout(t); t = setTimeout(() => finish(reject, 'offline'), ms); };
+      const answered = (c, viaRelay) => d => {
+        if (viaRelay) this.viaRelay.add(code); else this.viaRelay.delete(code);
+        finish(resolve, { reply: d, conn: c }, c);
+      };
+      const useRelay = () => {
+        if (done || relay || !relayUp()) return false;
+        relay = this.dialer.dial('f' + code);
+        relay.on('data', answered(relay, true));
+        relay.hello(msg);
+        return true;
+      };
+      // the direct way didn't work: whatever the relay can do now is all there is
+      const unreachable = () => {
+        if (done || gone) return;
+        gone = true; clearTimeout(slow);
+        if (direct) { const d = direct; direct = null; try { d.close(); } catch { } }
+        if (relay || useRelay()) shorten(both ? 3000 : 5000);
+        else finish(reject, 'offline');
+      };
+      this.pending.set(code, { fail: why => finish(reject, why), unreachable });
+      if (both || !this.ready || this.viaRelay.has(code)) useRelay();
+      if (!this.ready || (!both && relay)) { if (!relay) finish(reject, 'offline'); return; }
+      const conn = direct = this.peer.connect(prefix() + code, { reliable: true, serialization: 'json' });
+      if (!both) slow = setTimeout(() => { if (!opened) unreachable(); }, 4000);
+      conn.on('open', () => { opened = true; clearTimeout(slow); if (direct === conn) conn.send(msg); });
+      conn.on('data', d => { if (direct === conn) answered(conn, false)(d); });
+      conn.on('error', () => { });
+      conn.on('close', () => { if (direct === conn) unreachable(); });
     }));
   }
   hello() { const p = profile(); return { type: 'hello', v: 1, code: myFriendCode(), name: p.name }; }
@@ -151,7 +210,7 @@ class Presence {
   check(code, quiet) {
     const s = this.status.get(code);
     if (!quiet || !s) this.setStatus(code, 'checking');
-    return this.talk(code, { ...this.hello(), added: isFriend(code) })
+    return this.talk(code, { ...this.hello(), added: isFriend(code) }, 9000, true)
       .then(({ reply, conn }) => {
         if (reply && reply.type === 'hi') { rename(code, reply.name); this.setStatus(code, reply.busy ? 'busy' : 'online'); }
         setTimeout(() => { try { conn.close(); } catch { } }, 200);
