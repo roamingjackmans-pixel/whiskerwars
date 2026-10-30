@@ -3,6 +3,7 @@ import { HERO_BY_ID, BUILDINGS, CONVERT_COST, EMOTES, MAX_CATNIP, RULES, PURR_PE
 import { heroPortraitURL } from './art.js';
 import { audio } from './audio.js';
 import { profile, setSetting, save as saveProfile } from './profile.js';
+import { exitFullscreen, inFullscreen } from './device.js';
 
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const fmtTime = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -181,6 +182,16 @@ export class Hud {
   }
 
   setPct(p) { this.root.querySelectorAll('.pct-btn').forEach(b => b.classList.toggle('on', +b.dataset.p === p)); }
+  /** a player whose app is covered or whose connection dropped: 📵 on their card (with seconds left, if given) */
+  setAway(seat, v) {
+    for (const c of this.els.cards) {
+      if (+c.dataset.o !== seat) continue;
+      c.classList.toggle('away', v !== false && v != null);
+      let b = c.querySelector('.away-tag');
+      if (!b) { b = el('div', 'away-tag'); c.appendChild(b); }
+      b.textContent = typeof v === 'number' ? `📵 ${v}s` : '📵 away';
+    }
+  }
   setAll(on) {
     const b = this.root.querySelector('.all-btn');
     if (b) b.classList.toggle('on', on);
@@ -188,6 +199,13 @@ export class Hud {
     else if (this.hintKind === 'all') this.hintMsg(null);
   }
 
+  /** first full-screen battle: how to get the phone's own buttons back */
+  fsTip() {
+    const p = profile();
+    if (p.fsTip || !inFullscreen()) return;
+    p.fsTip = 1; saveProfile();
+    this.toast(`⛶ Full screen battle! To get your phone's Home and Back buttons, tap <b>☰</b> then <b>Exit full screen</b>.`);
+  }
   /** first few phone battles: a one-line reminder of how to send cats */
   coach() {
     const p = profile();
@@ -522,6 +540,7 @@ export class Hud {
         <div><b>1-3</b> spells · <b>4</b> 🦉 Owl Scout · <b>Q W E R</b> send 25-100% · <b>T</b> emotes · <b>Esc</b> cancel</div>
         <div>Enemy cat counts are hidden (<b>?</b>): the Owl Scout shows them for ${SCOUT.dur}s</div>`}
       </div>
+      ${inFullscreen() ? '<button class="btn p-exitfs">⛶ Exit full screen<small>brings back your phone&#39;s Home and Back buttons</small></button>' : ''}
       <button class="btn danger p-surrender">🏳️ Surrender</button>
     </div>`;
     p.classList.remove('hidden');
@@ -534,6 +553,8 @@ export class Hud {
       ev.target.textContent = on ? '🎵 Music: on' : '🎵 Music: off';
     };
     p.querySelector('.p-sound').onclick = ev => { this.toggleMute(); ev.target.textContent = audio.muted ? '🔇 Sound: off' : '🔊 Sound: on'; };
+    const fsb = p.querySelector('.p-exitfs');
+    if (fsb) fsb.onclick = () => { exitFullscreen(); fsb.remove(); this.toast('⛶ Full screen off. Turn it off for good in Settings.'); };
     p.querySelector('.p-surrender').onclick = ev => {
       if (ev.target.dataset.sure) { close(); this.m.surrender(); }
       else { ev.target.dataset.sure = 1; ev.target.textContent = 'Tap again to give up'; }
