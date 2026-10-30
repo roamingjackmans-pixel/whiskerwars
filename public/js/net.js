@@ -1,10 +1,18 @@
 // Whisker Wars networking: two interchangeable transports.
 //  - WSTransport: relay through the included Node server (most reliable)
-//  - P2PTransport: direct WebRTC via PeerJS (works on any static website)
+//  - P2PTransport: direct WebRTC via PeerJS (works on any static website), with a backup relay for players
+//    whose phone or network can't connect directly: if the direct connection fails or hasn't opened within
+//    6 s, their messages go through public MQTT servers over secure websockets instead (relay.js). The host
+//    always listens there too. (PeerJS's own free relay server has shut down.)
 // A room has a host and up to 3 guests. Guests are numbered by slot (1-3). Events: 'message'(data, fromSlot),
 // 'peer-join'(slot), 'peer-leave'(slot); a guest hears from the host as slot 0. send(data, toSlot?) on the
 // host goes to one guest or, without a slot, to all of them.
+import { RelayHost, RelayGuest } from './relay.js';
+
 const MAX_GUESTS = 3;
+const RTC_WAIT = 6000;    // how long the direct connection gets before a guest tries the relay as well
+// ?forcerelay in the page address skips the direct connection, for testing the relay
+const FORCE_RELAY = typeof location !== 'undefined' && /[?&]forcerelay\b/.test(location.search);
 // Room codes are 5 digits: easy to read out and type on a phone's number pad.
 const CODE_ALPHABET = '0123456789';
 export function genCode(n = 5) {
@@ -146,17 +154,15 @@ export class P2PTransport extends Emitter {
         this.peer = await this._newPeer(prefix + code);
         this.code = code; this.isHost = true;
         this.peer.on('connection', conn => {
-          // the same player reconnecting takes back their slot; otherwise the next free one (up to 3 guests)
-          const pid = conn.metadata && conn.metadata.pid;
-          let slot = 0;
-          for (const [s, c] of this.conns) if (pid && c.metadata && c.metadata.pid === pid) { slot = s; this.conns.delete(s); try { c.close(); } catch {} }
-          if (!slot) for (let s = 1; s <= MAX_GUESTS && !slot; s++) if (!this.conns.has(s) || !this.conns.get(s).open) slot = s;
+          const slot = this._slotFor(conn.metadata && conn.metadata.pid);
           if (!slot) { conn.on('open', () => { conn.send({ type: 'full' }); setTimeout(() => conn.close(), 300); }); return; }
           this.conns.set(slot, conn);
           conn.on('open', () => { this._wireGuest(conn, slot); this.emit('peer-join', slot); });
         });
         this.peer.on('disconnected', () => { try { this.peer && !this.peer.destroyed && this.peer.reconnect(); } catch {} });
         this.peer.on('error', e => console.warn('peer error', e && e.type));
+        // players who can't connect directly come in through the relay
+        this.hub = new RelayHost(code, conn => this._acceptRelay(conn)).start();
         return code;
       } catch (e) {
         lastErr = e;
@@ -166,22 +172,80 @@ export class P2PTransport extends Emitter {
     }
     throw lastErr || new Error('Could not create room');
   }
+  /** host: the same player reconnecting takes back their slot; otherwise the next free one (up to 3 guests) */
+  _slotFor(pid) {
+    let slot = 0;
+    for (const [s, c] of this.conns) if (pid && c.metadata && c.metadata.pid === pid) { slot = s; this.conns.delete(s); try { c.close(); } catch {} }
+    if (!slot) for (let s = 1; s <= MAX_GUESTS && !slot; s++) if (!this.conns.has(s) || !this.conns.get(s).open) slot = s;
+    return slot;
+  }
+  /** host: a player coming in through the relay. Their first message says who they are. */
+  _acceptRelay(conn) {
+    let placed = false;
+    conn.on('data', m => {
+      if (placed || !m || m.t !== 'relay-hello') return;
+      placed = true;
+      conn.metadata = { pid: m.pid };
+      const slot = this._slotFor(m.pid);
+      conn.send({ t: 'relay-ok' });
+      if (!slot) { conn.send({ type: 'full' }); setTimeout(() => conn.close(), 300); return; }
+      this._wireGuest(conn, slot);
+      this.emit('peer-join', slot);
+    });
+  }
+  /**
+   * Join: straight to the host's browser if we can, otherwise through the relay. The relay starts connecting at
+   * once, so switching over is quick, and gets used if the direct connection fails or hasn't opened within
+   * RTC_WAIT. Without the matchmaking service at all, the relay is the only way in.
+   */
   async join(code, pid) {
     const prefix = cfg().peerPrefix || 'whiskerwars-v1-';
-    this.peer = await this._newPeer(null);
+    this.peer = await this._newPeer(null).catch(() => null);
+    const relay = new RelayGuest(code).prepare();
+    const notFound = msg => Object.assign(new Error(msg), { code: 'notfound' });
     await new Promise((resolve, reject) => {
-      const conn = this.peer.connect(prefix + code, { reliable: true, serialization: 'json', metadata: { pid } });
-      const timer = setTimeout(() => reject(Object.assign(new Error('Room not found (or your friend\'s network blocked the connection)'), { code: 'notfound' })), 15000);
+      let path = null, done = false, conn = null, slow = 0;
+      const finish = err => {
+        if (done) return;
+        done = true; clearTimeout(timer); clearTimeout(slow);
+        if (err) { relay.close(); reject(err); } else resolve();
+      };
+      const timer = setTimeout(() => finish(notFound('Room not found (or the connection was blocked)')), 20000);
+      const blocked = () => finish(new Error(this.peer ? "Couldn't connect to that room. Your network may be blocking it." : 'Could not reach the game servers. Check your internet connection.'));
+      const useRelay = why => {
+        if (path || done) return;
+        console.debug('[net] trying the relay:', why);
+        if (relay.dead) return blocked();
+        path = 'relay';
+        clearTimeout(slow);
+        if (conn) { try { conn.close(); } catch {} }
+        relay.on('data', m => {
+          if (done || !m || m.t !== 'relay-ok') return;
+          this.kind = 'relay';
+          this._wire(relay);
+          console.debug('[net] joined through the relay', relay.via);
+          finish();
+        });
+        relay.on('dead', () => { if (!done) blocked(); });
+        relay.hello({ t: 'relay-hello', pid });
+      };
+      if (!this.peer || FORCE_RELAY) { useRelay(this.peer ? 'forced' : 'no matchmaking service'); return; }
+      conn = this.peer.connect(prefix + code, { reliable: true, serialization: 'json', metadata: { pid } });
+      slow = setTimeout(() => useRelay('direct connection is slow'), RTC_WAIT);
       this.peer.on('error', e => {
-        clearTimeout(timer);
-        if (e && e.type === 'peer-unavailable') reject(Object.assign(new Error('Room not found'), { code: 'notfound' }));
-        else reject(e);
+        if (done) return;
+        if (e && e.type === 'peer-unavailable') finish(notFound('Room not found'));
+        else useRelay('error ' + (e && e.type));
       });
       conn.on('open', () => {
-        clearTimeout(timer);
+        if (path || done) { try { conn.close(); } catch {} return; }
+        path = 'direct';
+        relay.close();
         this._wire(conn);
-        resolve();
+        finish();
       });
+      conn.on('close', () => { if (!path && !done) useRelay('direct connection failed'); });
+      conn.on('error', () => {});
     });
     this.code = code; this.isHost = false;
   }
@@ -192,6 +256,8 @@ export class P2PTransport extends Emitter {
   }
   get connected() { return this.isHost ? [...this.conns.values()].some(c => c.open) : !!this.conn && this.conn.open; }
   close() {
+    try { this.hub && this.hub.stop(); } catch {}
+    this.hub = null;
     try { this.conn && this.conn.close(); } catch {}
     for (const c of this.conns.values()) { try { c.close(); } catch {} }
     try { this.peer && this.peer.destroy(); } catch {}

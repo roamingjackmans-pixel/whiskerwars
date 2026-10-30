@@ -556,7 +556,7 @@ SCREENS.lobby = () => {
           <button class="btn small copy-link">🔗 Copy invite link</button>
           ${navigator.share ? '<button class="btn small share">📤 Share</button>' : ''}
         </div>
-        <div class="room-mode muted small">${S.kind === 'server' ? 'via game server' : 'peer-to-peer'}</div>
+        <div class="room-mode muted small">${S.kind === 'server' ? 'via game server' : S.kind === 'relay' ? 'via backup relay' : 'peer-to-peer'}</div>
       </div>
       <div class="lobby-seats"></div>
       <div class="lobby-cols">
