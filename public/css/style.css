@@ -476,6 +476,12 @@ table.stats td:not(:first-child), table.stats th { text-align: center; font-weig
 .bm-up.off, .bm-conv button.off { filter: grayscale(.8); opacity: .6; }
 .bm-max { text-align: center; color: var(--gold-d); font-weight: 700; }
 .bm-conv-l { font-size: 12px; margin: 8px 0 4px; color: var(--ink2); }
+/* "change this building into...?" confirm step */
+.bm-ask { display: flex; gap: 6px; margin-top: 8px; }
+.bm-ask button { border: 0; border-radius: 12px; padding: 8px 10px; font-weight: 700; font-size: 15px; cursor: pointer; }
+.bm-ask .bm-yes { flex: 1; color: #fff; background: linear-gradient(#8fe0a8, var(--mint)); box-shadow: 0 4px 0 var(--mint-d); }
+.bm-ask .bm-yes.off { filter: grayscale(.8); opacity: .6; }
+.bm-ask .bm-no { background: #f0e2cf; color: var(--ink); box-shadow: 0 4px 0 #dcc8ae; }
 .bm-conv { display: flex; gap: 6px; }
 .bm-conv button { flex: 1; border: 0; border-radius: 10px; background: #fff; padding: 6px 0; font-size: 22px; cursor: pointer; box-shadow: 0 3px 0 #e2cfb8; display: flex; flex-direction: column; align-items: center; }
 .bm-conv button span { font-size: 11px; font-weight: 700; color: var(--ink2); }

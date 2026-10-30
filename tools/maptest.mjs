@@ -24,8 +24,10 @@ for (const map of list) {
   if (seats !== 3) for (let c = 0; c < NAV_COLS * NAV_ROWS; c++) if (nav.blocked[c] !== nav.blocked[NAV_COLS * NAV_ROWS - 1 - c]) asym++;
   if (asym) problems.push(`${asym} terrain cells are not mirrored`);
   // every seat sees the same roads: compare each base's sorted walking distances to everything else
+  // (only for maps built by turning or mirroring every seat; the hand-balanced 3 player maps are checked by
+  // tools/seats.mjs and tools/seatsim.mjs instead)
   let seatGap = 0;
-  if (seats > 2) {
+  if (seats === 4 || map.rot3) {
     const prof = bases.map(a => B.filter(b => b !== a).map(b => nav.len(a.id, b.id)).sort((x, y) => x - y));
     for (const p of prof) for (let k = 0; k < p.length; k++) seatGap = Math.max(seatGap, Math.abs(p[k] - prof[0][k]) / Math.max(200, prof[0][k]));
     if (seatGap > 0.05) problems.push(`seats differ: roads up to ${(seatGap * 100).toFixed(1)}% longer for one player`);
@@ -49,7 +51,7 @@ for (const map of list) {
   if (worstFair > 0.04 && !lopsided) problems.push(`routes differ between the two sides by up to ${(worstFair * 100).toFixed(1)}%`);
   else if (lopsided) console.log('   (note: this map has a "centre" building off the centre, so it is not exactly symmetric)');
   const p0 = B.find(b => b.owner === 0), p1 = B.find(b => b.owner === 1);
-  console.log(`${(map.id + (map.id === 'random' ? '#' + map.name.split('#')[1] : '')).padEnd(13)} ${seats}p ${String(B.length).padStart(2)} bldg ${String((map.obstacles || []).length).padStart(2)} obst  nav ${ms.toFixed(0).padStart(3)}ms  bases ${Math.round(nav.len(p0.id, p1.id))} (straight ${Math.round(Math.hypot(p0.x - p1.x, p0.y - p1.y))})  detour avg ${(sumDetour / n).toFixed(2)} max ${worstDetour.toFixed(2)} [${worstPair}]  fair ${(worstFair * 100).toFixed(1)}%${seats > 2 ? ` seats ${(seatGap * 100).toFixed(1)}%` : ''}`);
+  console.log(`${(map.id + (map.id === 'random' ? '#' + map.name.split('#')[1] : '')).padEnd(13)} ${seats}p ${String(B.length).padStart(2)} bldg ${String((map.obstacles || []).length).padStart(2)} obst  nav ${ms.toFixed(0).padStart(3)}ms  bases ${Math.round(nav.len(p0.id, p1.id))} (straight ${Math.round(Math.hypot(p0.x - p1.x, p0.y - p1.y))})  detour avg ${(sumDetour / n).toFixed(2)} max ${worstDetour.toFixed(2)} [${worstPair}]  fair ${(worstFair * 100).toFixed(1)}%${seats === 4 || map.rot3 ? ` seats ${(seatGap * 100).toFixed(1)}%` : seats === 3 ? ' (hand-balanced)' : ''}`);
   for (const p of problems) { console.log('   !! ' + p); bad++; }
   if (ids.length) draw(map, nav);
 }

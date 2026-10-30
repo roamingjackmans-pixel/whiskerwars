@@ -24,7 +24,7 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | Fun modifiers | Zoomies (fast cats), Catnip Frenzy, Kitten Boom, Big Start — toggle in the lobby or practice setup |
 | 12 heroes | 4 clans, each hero has a passive + 3 spells (36 spells), unlocked with fish coins earned by playing |
 | 5 building types | Kitten Cottage (5 levels), Scratch Tower, Yarn Forge, Catnip Garden, Grand Cat Tree. Upgrade or convert any time |
-| Maps | 26 maps. 2 players: 6 open fields and 13 with terrain (ponds, rivers, islands joined by bridges, hedges, walls, snow ridges, dirt mounds) that make cats walk the long way round. 3 players: 3 maps that repeat three ways around the middle. 4 players: 4 maps mirrored into every corner. Open and terrain maps for each player count. Random maps (2 players) get lumps and ponds too. Every seat gets exactly the same roads; each player's view is turned so their own base is at the bottom / left |
+| Maps | 35 maps. 2 players: 6 open fields and 13 with terrain (ponds, rivers, islands joined by bridges, hedges, walls, snow ridges, dirt mounds) that make cats walk the long way round. 3 players: 3 compact maps that repeat three ways around the middle, and 5 that fill the whole field without being symmetric (each seat has a different spot, kept fair by equal road lengths and tuned strays). 4 players: 8 maps mirrored into every corner. Open and terrain maps for each player count. Random maps (2 players) get lumps and ponds too. Each player's view is turned so their own base is at the bottom / left |
 | Core mechanics | Drag-to-send (the arrow shows the road your cats will take), swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy. A building taken from the other player drops one upgrade level. Towers slowly grow back cats lost in a failed attack; towers, forges and gardens never shrink on their own |
 | Solo | 12-level campaign with 3-star ratings, practice against 1-3 computer cats at 4 difficulties, live AI battle on the menu background |
 | Progression | Coins, XP & levels, daily gift, first-win bonus, 13 achievements, 15 furs + 12 hats (your whole army wears them), match history |
@@ -87,6 +87,8 @@ node tools/probe.mjs duchess  # one hero vs everyone (add a spell id or "passive
 node tools/relaytest.mjs      # tests the WebSocket relay with a host and 3 guests (server must be running)
 node tools/rejointest.mjs     # tests reconnecting into a room (server must be running)
 node tools/lobbytest.mjs      # tests the 2-4 player lobby/match message protocol in memory
+node tools/seats.mjs          # 3-4 player maps: road length between bases, strays each seat reaches first, how close seats touch
+node tools/seatsim.mjs tripass 900  # does a map favour a seat? same hero and AI on every seat, many games
 ```
 
 Add `?p2p` to the page URL to force peer-to-peer mode even when the server is available.

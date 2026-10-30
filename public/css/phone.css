@@ -158,6 +158,9 @@
 .hud.phone .bm-row .bm-up span { color: #fff; }
 .hud.phone .bm-row .bm-x { width: 32px; background: #f0e2cf; box-shadow: none; font-size: 14px; margin: 0; }
 .hud.phone .bm-row .off { filter: grayscale(.8); opacity: .55; }
+.hud.phone .bm-row .bm-yes { width: 64px; background: linear-gradient(#8fe0a8, var(--mint)); box-shadow: 0 3px 0 var(--mint-d); color: #fff; font-weight: 700; }
+.hud.phone .bm-row .bm-yes span { color: #fff; }
+.hud.phone .bm-row .bm-no { width: 44px; background: #f0e2cf; box-shadow: none; font-size: 16px; }
 .hud.phone .cd-num { font-size: 120px; }
 .hud.phone .banner-t { font-size: clamp(54px, 16vw, 120px); }
 .hud.phone .banner-s { font-size: 16px; }

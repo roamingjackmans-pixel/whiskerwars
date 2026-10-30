@@ -364,12 +364,13 @@ export class Hud {
   // ---------- building menu ----------
   openBMenu(b, V) {
     this.bmenuFor = b.id;
+    this.convAsk = null;
     this.bmenuKey = '';
     this.els.bmenu.classList.remove('hidden');
     this.refreshBMenu(V, true);
     this.positionBMenu(b);
   }
-  closeBMenu() { this.bmenuFor = null; this.els.bmenu.classList.add('hidden'); }
+  closeBMenu() { this.bmenuFor = null; this.convAsk = null; this.els.bmenu.classList.add('hidden'); }
   positionBMenu(b) {
     const R = this.m.renderer;
     const s = R.toScreen(b.x, b.y);
@@ -392,6 +393,7 @@ export class Hud {
     menu.style.top = Math.max(60, y) + 'px';
   }
   refreshBMenu(V, force) {
+    this.lastV = V;
     const b = V.byId.get(this.bmenuFor);
     if (!b) return this.closeBMenu();
     const def = BUILDINGS[b.type];
@@ -399,7 +401,9 @@ export class Hud {
     const cost = def.upgradeCost[b.level - 1] != null ? (eng ? Math.ceil(def.upgradeCost[b.level - 1] * 0.75) : def.upgradeCost[b.level - 1]) : null;
     const n = Math.floor(b.count);
     const convs = def.noConvert ? [] : Object.keys(CONVERT_COST).filter(t => t !== b.type).map(t => ({ t, c: eng ? Math.ceil(CONVERT_COST[t] * 0.75) : CONVERT_COST[t] }));
-    const key = `${b.id}|${b.type}|${b.level}|${cost != null && n >= cost}|${convs.map(c => n >= c.c ? 1 : 0).join('')}`;
+    // changing a building's type asks first: the first tap picks the new type, the second confirms it
+    const ask = this.convAsk && this.convAsk.id === b.id ? convs.find(c => c.t === this.convAsk.t) : null;
+    const key = `${b.id}|${b.type}|${b.level}|${cost != null && n >= cost}|${convs.map(c => n >= c.c ? 1 : 0).join('')}|${ask ? ask.t : ''}`;
     if (!force && key === this.bmenuKey) return;
     this.bmenuKey = key;
     let info = '';
@@ -408,6 +412,7 @@ export class Hud {
     else if (def.atkBonus) info = `⚔ +${Math.round(def.atkBonus[b.level - 1] * 100)}% attack for all cats`;
     else if (def.catnipBonus) info = `🌿 +${Math.round(def.catnipBonus[b.level - 1] * 100)}% catnip regen`;
     const m = this.els.bmenu;
+    if (ask) return this.drawConvertAsk(m, b, def, ask, n);
     if (this.phone) {
       m.innerHTML = `
         <div class="bm-h">${def.icon} ${def.name} <span class="lv">Lv ${b.level}</span></div>
@@ -419,7 +424,7 @@ export class Hud {
       m.querySelector('.bm-x').onclick = () => this.m.closeMenu();
       const upb = m.querySelector('.bm-up');
       if (upb) upb.onclick = () => { this.m.upgrade(b.id); };
-      m.querySelectorAll('.bm-cv').forEach(x => x.onclick = () => this.m.convert(b.id, x.dataset.t));
+      m.querySelectorAll('.bm-cv').forEach(x => x.onclick = () => this.askConvert(b, x.dataset.t));
       requestAnimationFrame(() => this.bmenuFor === b.id && this.positionBMenu(b));
       return;
     }
@@ -432,7 +437,34 @@ export class Hud {
     m.querySelector('.bm-x').onclick = () => this.m.closeMenu();
     const up = m.querySelector('.bm-up');
     if (up) up.onclick = () => { this.m.upgrade(b.id); };
-    m.querySelectorAll('.bm-conv button').forEach(x => x.onclick = () => this.m.convert(b.id, x.dataset.t));
+    m.querySelectorAll('.bm-conv button').forEach(x => x.onclick = () => this.askConvert(b, x.dataset.t));
+  }
+  askConvert(b, t) {
+    this.convAsk = t ? { id: b.id, t } : null;
+    if (!this.lastV) return;
+    this.refreshBMenu(this.lastV, true);
+    requestAnimationFrame(() => this.bmenuFor === b.id && this.positionBMenu(b));
+  }
+  /** "Change this Forge into a Tower?" with a yes and a cancel button. */
+  drawConvertAsk(m, b, def, ask, n) {
+    const to = BUILDINGS[ask.t], off = n >= ask.c ? '' : 'off';
+    if (this.phone) {
+      m.innerHTML = `
+        <div class="bm-h">${def.icon} → ${to.icon} Change to ${to.name}?</div>
+        <div class="bm-row">
+          <button class="bm-yes ${off}" aria-label="Yes, change it">✔<span>${ask.c}</span></button>
+          <button class="bm-no" aria-label="Cancel">✕</button>
+        </div>`;
+    } else {
+      m.innerHTML = `
+        <div class="bm-h">${def.icon} → ${to.icon} ${to.name}?<button class="bm-x">✕</button></div>
+        <div class="bm-i">Change this ${def.name} into a ${to.name} for <b>${ask.c} 🐾</b>. It starts again at level 1.</div>
+        <div class="bm-ask"><button class="bm-yes ${off}">✔ Yes, change it</button><button class="bm-no">Cancel</button></div>`;
+      m.querySelector('.bm-x').onclick = () => this.m.closeMenu();
+    }
+    m.querySelector('.bm-yes').onclick = () => { this.convAsk = null; this.m.convert(b.id, ask.t); };
+    m.querySelector('.bm-no').onclick = () => this.askConvert(b, null);
+    requestAnimationFrame(() => this.bmenuFor === b.id && this.positionBMenu(b));
   }
 
   // ---------- emotes / pause ----------

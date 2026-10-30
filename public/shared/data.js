@@ -417,6 +417,29 @@ function terrain4(quarter) {
   }
   return out;
 }
+// 3 players on the whole field, without turning: two seats mirror each other across the middle line ('y': top and
+// bottom, 'x': left and right) and the third seat sits on that line, kept fair by hand (tools/seats.mjs, seatsim.mjs).
+// List seat 0's pieces, seat 1's half and the line; seat 1's mirror image becomes seat 2. axis:true = on the line.
+function pair3(list, axis) {
+  const out = [];
+  for (const b of list) {
+    const { axis: on, ...c } = b;
+    out.push(c);
+    if (on) continue;
+    out.push({ ...c, x: axis === 'x' ? WORLD_W - c.x : c.x, y: axis === 'y' ? WORLD_H - c.y : c.y, owner: c.owner === 1 ? 2 : c.owner === 0 ? 0 : c.owner });
+  }
+  return finish(out);
+}
+function terrainPair(list, axis) {
+  const out = [], seen = new Set();
+  for (const o of list) for (const flip of [false, true]) {
+    if (flip && o.center) continue;
+    const m = moveShape(o, ([x, y]) => (flip ? (axis === 'x' ? [WORLD_W - x, y] : [x, WORLD_H - y]) : [x, y]), a => (flip ? -a : a));
+    const k = shapeKey(m);
+    if (!seen.has(k)) { seen.add(k); out.push(m); }
+  }
+  return out;
+}
 function terrain3(share, cx, cy) {
   const out = [];
   for (let k = 0; k < 3; k++) for (const o of share) {
@@ -784,6 +807,146 @@ MAPS.push(
     ], ...T3),
   },
 );
+// ---- 3 player maps on the whole field (not turned around a point; seats kept fair with roads and strays)
+MAPS.push(
+  {
+    id: 'trifork', name: 'Forked River', theme: 'beach', size: 'Large', players: 3,
+    desc: 'A river splits the two eastern docks from the Cat Tree to the east ford. The west holds the whole shore.',
+    buildings: pair3([
+      { x: 130, y: 450, type: 'cottage', level: 2, owner: 0, count: 20, axis: true },
+      { x: 330, y: 450, type: 'cottage', count: 12, axis: true },
+      { x: 180, y: 185, type: 'cottage', count: 8 },
+      { x: 430, y: 255, type: 'tower', count: 14 },
+      { x: 590, y: 130, type: 'forge', count: 14 },
+      { x: 1100, y: 170, type: 'cottage', level: 2, owner: 1, count: 20 },
+      { x: 1340, y: 110, type: 'cottage', count: 8 },
+      { x: 1290, y: 320, type: 'cottage', count: 10 },
+      { x: 1500, y: 250, type: 'cottage', count: 9 },
+      { x: 900, y: 315, type: 'tower', count: 14 },
+      { x: 1500, y: 95, type: 'garden', count: 12 },
+      { x: 655, y: 450, type: 'cattree', count: 45, axis: true },
+    ], 'y'),
+    obstacles: terrainPair([
+      C(river([[765, 450], [1420, 450]], 90)),
+    ], 'y'),
+  },
+  {
+    id: 'tripass', name: 'Frostbite Pass', theme: 'snow', size: 'Large', players: 3,
+    desc: 'Two long ridges cut the slopes. Climb past their tops or sneak round their feet by the corners.',
+    buildings: pair3([
+      { x: 800, y: 790, type: 'cottage', level: 2, owner: 0, count: 20, axis: true },
+      { x: 800, y: 610, type: 'cottage', count: 8, axis: true },
+      { x: 620, y: 770, type: 'cottage', count: 7 },
+      { x: 560, y: 600, type: 'tower', count: 10 },
+      { x: 300, y: 240, type: 'cottage', level: 2, owner: 1, count: 20 },
+      { x: 130, y: 120, type: 'cottage', count: 9 },
+      { x: 610, y: 150, type: 'cottage', count: 11 },
+      { x: 140, y: 420, type: 'cottage', count: 12 },
+      { x: 420, y: 380, type: 'tower', count: 13 },
+      { x: 130, y: 640, type: 'forge', count: 15 },
+      { x: 800, y: 300, type: 'cattree', count: 40, axis: true },
+      { x: 800, y: 130, type: 'cottage', count: 14, axis: true },
+    ], 'x'),
+    obstacles: terrainPair([
+      ridge([[330, 700], [690, 290]], 56),
+      rock(560, 450, 30),
+    ], 'x'),
+  },
+  {
+    id: 'trihedge', name: 'Moonlit Hedgerows', theme: 'night', size: 'Large', players: 3,
+    desc: 'A long hedge runs from the Cat Tree to the west gate. Two gardens share the west; the east stands alone.',
+    buildings: finish([
+      { x: 1470, y: 430, type: 'cottage', level: 2, owner: 1, count: 20 },
+      { x: 1270, y: 450, type: 'cottage', count: 11 },
+      { x: 1420, y: 170, type: 'cottage', count: 7 },
+      { x: 1420, y: 720, type: 'cottage', count: 7 },
+      { x: 1170, y: 250, type: 'tower', count: 13 },
+      { x: 1170, y: 650, type: 'tower', count: 13 },
+      { x: 520, y: 170, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 270, y: 110, type: 'cottage', count: 10 },
+      { x: 310, y: 330, type: 'cottage', count: 14 },
+      { x: 100, y: 260, type: 'cottage', count: 11 },
+      { x: 720, y: 330, type: 'tower', count: 18 },
+      { x: 110, y: 90, type: 'garden', count: 15 },
+      { x: 470, y: 745, type: 'cottage', level: 2, owner: 2, count: 20 },
+      { x: 230, y: 790, type: 'cottage', count: 6 },
+      { x: 290, y: 600, type: 'cottage', count: 7 },
+      { x: 100, y: 660, type: 'cottage', count: 7 },
+      { x: 680, y: 610, type: 'tower', count: 10 },
+      { x: 720, y: 820, type: 'garden', count: 9 },
+      { x: 945, y: 460, type: 'cattree', count: 40 },
+      { x: 1000, y: 120, type: 'forge', count: 18 },
+      { x: 1000, y: 800, type: 'forge', count: 11 },
+    ]),
+    obstacles: [
+      hedge([[840, 462], [520, 466], [170, 476]]),
+      pond(250, 470, 60, 40),
+    ],
+  },
+  {
+    id: 'trichoco', name: 'Chocolate Falls', theme: 'candy', size: 'Large', players: 3,
+    desc: 'A chocolate river pours from the Cat Tree to the east shore. Gumdrop hills shelter the west.',
+    buildings: finish([
+      { x: 170, y: 390, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 380, y: 450, type: 'cottage', count: 13 },
+      { x: 150, y: 120, type: 'cottage', count: 10 },
+      { x: 180, y: 640, type: 'cottage', count: 11 },
+      { x: 450, y: 200, type: 'tower', count: 17 },
+      { x: 470, y: 640, type: 'tower', count: 17 },
+      { x: 1170, y: 160, type: 'cottage', level: 2, owner: 1, count: 20 },
+      { x: 1370, y: 110, type: 'cottage', count: 7 },
+      { x: 1330, y: 320, type: 'cottage', count: 9 },
+      { x: 960, y: 140, type: 'cottage', count: 7 },
+      { x: 980, y: 340, type: 'tower', count: 13 },
+      { x: 1500, y: 230, type: 'garden', count: 11 },
+      { x: 1140, y: 740, type: 'cottage', level: 2, owner: 2, count: 20 },
+      { x: 1470, y: 790, type: 'cottage', count: 7 },
+      { x: 1380, y: 600, type: 'cottage', count: 9 },
+      { x: 980, y: 800, type: 'cottage', count: 8 },
+      { x: 990, y: 640, type: 'tower', count: 13 },
+      { x: 700, y: 470, type: 'cattree', count: 40 },
+      { x: 560, y: 120, type: 'forge', count: 17 },
+      { x: 630, y: 790, type: 'garden', count: 13 },
+    ]),
+    obstacles: [
+      river([[810, 480], [1050, 480], [1250, 460], [1410, 470]], 92),
+      gumdrop(300, 230, 46),
+      gumdrop(330, 560, 40),
+      gumdrop(560, 360, 34),
+    ],
+  },
+  {
+    id: 'trichimney', name: 'Chimney Diagonal', theme: 'rooftop', size: 'Large', players: 3,
+    desc: 'An alley cuts from the Cat Tree up to the north-east corner. Three gangs, three very different rooftops.',
+    buildings: finish([
+      { x: 200, y: 770, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 120, y: 560, type: 'cottage', count: 11 },
+      { x: 430, y: 810, type: 'cottage', count: 10 },
+      { x: 450, y: 630, type: 'cottage', count: 14 },
+      { x: 280, y: 420, type: 'tower', count: 17 },
+      { x: 620, y: 720, type: 'tower', count: 17 },
+      { x: 980, y: 140, type: 'cottage', level: 2, owner: 1, count: 20 },
+      { x: 760, y: 110, type: 'cottage', count: 5 },
+      { x: 1125, y: 90, type: 'cottage', count: 6 },
+      { x: 950, y: 340, type: 'cottage', count: 7 },
+      { x: 750, y: 300, type: 'tower', count: 9 },
+      { x: 1245, y: 165, type: 'garden', count: 8 },
+      { x: 1240, y: 720, type: 'cottage', level: 2, owner: 2, count: 20 },
+      { x: 1450, y: 590, type: 'cottage', count: 9 },
+      { x: 1480, y: 790, type: 'cottage', count: 11 },
+      { x: 1180, y: 520, type: 'cottage', count: 13 },
+      { x: 950, y: 790, type: 'tower', count: 17 },
+      { x: 1490, y: 420, type: 'forge', count: 14 },
+      { x: 790, y: 530, type: 'cattree', count: 40 },
+      { x: 130, y: 130, type: 'garden', count: 17 },
+    ]),
+    obstacles: [
+      sea([[870, 500], [920, 450], [1370, 160], [1415, 205], [960, 530], [905, 560]]),
+      wall([[430, 470], [560, 380]], 44),
+      rock(560, 560, 26),
+    ],
+  },
+);
 // ---- 4 player maps (mirrored into all four corners)
 MAPS.push(
   {
@@ -843,6 +1006,73 @@ MAPS.push(
       hedge([[585, 392], [612, 352], [652, 320], [720, 292]]),
       hedge([[800, 30], [800, 205]]),
       hedge([[30, 450], [255, 450]]),
+    ]),
+  },
+  {
+    id: 'frozenlake', name: 'Frozen Lake', theme: 'snow', size: 'Large', players: 4, desc: 'The Cat Tree sits on an island in a frozen lake. Four bridges, one from every corner.',
+    buildings: mirror4([
+      { x: 170, y: 150, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 170, y: 370, type: 'cottage', count: 9 },
+      { x: 420, y: 130, type: 'cottage', count: 9 },
+      { x: 440, y: 330, type: 'tower', count: 14 },
+      { x: 650, y: 140, type: 'cottage', count: 12 },
+      { x: 300, y: 450, type: 'forge', count: 14 },
+      { x: 800, y: 450, type: 'cattree', count: 50 },
+    ]),
+    obstacles: terrain4([
+      pond(800, 450, 235, 175),
+      island(800, 450, 110, 90),
+      bridge(722, 402, 592, 322, 80),
+      rock(560, 120, 28),
+    ]),
+  },
+  {
+    id: 'gumdrophills', name: 'Gumdrop Hills', theme: 'candy', size: 'Medium', players: 4, desc: 'Gumdrop hills hide every corner from its neighbours. A big cottage waits in the middle.',
+    buildings: mirror4([
+      { x: 170, y: 150, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 160, y: 370, type: 'cottage', count: 9 },
+      { x: 420, y: 140, type: 'cottage', count: 10 },
+      { x: 450, y: 350, type: 'garden', count: 12 },
+      { x: 650, y: 240, type: 'cottage', count: 12 },
+      { x: 800, y: 110, type: 'tower', count: 14 },
+      { x: 300, y: 450, type: 'cottage', count: 12 },
+      { x: 800, y: 450, type: 'cottage', level: 2, count: 26 },
+    ]),
+    obstacles: terrain4([
+      gumdrop(640, 380, 48),
+      gumdrop(300, 290, 40),
+      gumdrop(590, 105, 34),
+    ]),
+  },
+  {
+    id: 'rooftopring', name: 'Rooftop Ring', theme: 'rooftop', size: 'Large', players: 4, desc: 'Brick walls ring the Cat Tree. The gates face your neighbours, not you.',
+    buildings: mirror4([
+      { x: 170, y: 150, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 170, y: 380, type: 'cottage', count: 9 },
+      { x: 420, y: 130, type: 'cottage', count: 9 },
+      { x: 400, y: 340, type: 'tower', count: 14 },
+      { x: 800, y: 130, type: 'cottage', count: 13 },
+      { x: 220, y: 450, type: 'forge', count: 14 },
+      { x: 680, y: 350, type: 'cottage', count: 10 },
+      { x: 800, y: 450, type: 'cattree', count: 45 },
+    ]),
+    obstacles: terrain4([
+      wall([[650, 240], [560, 240], [560, 335]], 44),
+      rock(600, 520, 26),
+    ]),
+  },
+  {
+    id: 'grandmeadow', name: 'Grand Meadow', theme: 'meadow', size: 'Large', players: 4, desc: 'Wide open fields packed with cottages. Grow fast and keep an eye on both neighbours.',
+    buildings: mirror4([
+      { x: 160, y: 140, type: 'cottage', level: 2, owner: 0, count: 20 },
+      { x: 160, y: 350, type: 'cottage', count: 8 },
+      { x: 380, y: 120, type: 'cottage', count: 8 },
+      { x: 390, y: 320, type: 'cottage', count: 12 },
+      { x: 600, y: 190, type: 'tower', count: 14 },
+      { x: 610, y: 380, type: 'cottage', count: 14 },
+      { x: 800, y: 110, type: 'cottage', count: 15 },
+      { x: 260, y: 450, type: 'garden', count: 13 },
+      { x: 800, y: 450, type: 'cattree', count: 50 },
     ]),
   },
 );
