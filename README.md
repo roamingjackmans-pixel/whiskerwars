@@ -29,7 +29,7 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | Solo | 12-level campaign with 3-star ratings, practice against 1-3 computer cats at 4 difficulties, live AI battle on the menu background |
 | Progression | Coins, XP & levels, daily gift, first-win bonus, 13 achievements, 15 furs + 12 hats (your whole army wears them), match history |
 | Polish | Procedural art, synthesized music & SFX, spell VFX, screen shake, keyboard shortcuts |
-| Phones | Own layout, on by default on phones: the field stands up in portrait (your base at the bottom), zooms onto the buildings, big tap zones, thumb dock (send %, 🐾 ALL, spells), compact upgrade bar, hold-to-read spells, vibration, full screen on Android, screen stays awake, back button opens the battle menu. Settings → Battle layout overrides it |
+| Phones | Own layout, on by default on phones: the field stands up in portrait (your base at the bottom), zooms onto the buildings, big tap zones, thumb dock (send %, 🐾 ALL, spells), compact upgrade bar, hold-to-read spells, vibration, full screen on Android, screen stays awake, back button opens the battle menu. Settings → Battle layout overrides it. Settings → 📲 Download app installs it on the home screen or desktop (the browser's install prompt in Chrome, Edge and Android; step-by-step help on iPhone, iPad, Safari and Firefox) |
 
 ## How online play works
 

@@ -329,6 +329,17 @@ input:focus, select:focus { border-color: var(--pink); }
 .settings input[type=range] { width: 220px; accent-color: var(--pink); }
 .settings input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--pink); }
 .settings hr { border: 0; border-top: 2px dashed #e8d6c0; width: 100%; }
+/* download app */
+.app-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.app-txt { display: flex; flex-direction: column; gap: 2px; flex: 1 1 220px; min-width: 0; }
+.app-txt b { font-size: 17px; }
+.app-row .dl-app { white-space: nowrap; }
+.app-row .dl-app[disabled] { filter: grayscale(.4); opacity: .75; cursor: default; }
+.install-help { text-align: center; max-width: 420px; }
+.install-help .ih-icon { width: 84px; height: 84px; border-radius: 20px; box-shadow: 0 6px 16px rgba(0,0,0,.25); }
+.install-help h2 { margin: 10px 0 6px; }
+.install-help ol { text-align: left; margin: 8px 0 16px; padding-left: 24px; display: flex; flex-direction: column; gap: 8px; line-height: 1.35; }
+.install-help .ia-ico { display: inline-block; background: #fff; border: 2px solid #f0dcc4; border-radius: 8px; padding: 0 6px; font-weight: 700; }
 
 /* ---------- results ---------- */
 .results { max-width: 1050px; margin: 0 auto; padding-top: 3vh; text-align: center; display: flex; flex-direction: column; gap: 14px; align-items: center; }

@@ -13,6 +13,7 @@ import { normalizeObstacles } from '../shared/nav.js';
 import { initFriends, presence, friends, addFriend, removeFriend, isFriend, myFriendCode, fmtFriendCode, cleanFriendCode, onFriends, setBusyCheck, recentPlayers, noteRecent, beReachable } from './friends.js';
 import { isPhone, applyDeviceClass, enterFullscreen, keepAwake, deviceSummary, desktopSiteMode } from './device.js';
 import { BUILD, isDev, versionLabel, fetchLatest, isNewer, reloadTo } from './update.js';
+import { isInstalled, promptInstall, installSteps, onInstallChange } from './install.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -1172,6 +1173,11 @@ SCREENS.settings = () => {
   const s = P.profile().settings;
   screens.innerHTML = `${topbar(true, 'Settings')}
     <div class="settings card panel">
+      <div class="app-row">
+        <div class="app-txt"><b>📲 Whisker Wars app</b><span class="muted small"></span></div>
+        <button class="btn primary dl-app">📲 Download app</button>
+      </div>
+      <hr>
       <label>🔊 Sound effects <input type="range" min="0" max="1" step="0.05" value="${s.sfx}" class="r-sfx"></label>
       <label>🎵 Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" class="r-music"></label>
       <label>🔇 Mute everything <input type="checkbox" class="c-mute" ${s.muted ? 'checked' : ''}></label>
@@ -1204,7 +1210,35 @@ SCREENS.settings = () => {
     if (!ev.target.dataset.sure) { ev.target.dataset.sure = 1; ev.target.textContent = 'Tap again to erase everything'; return; }
     P.resetProfile(); toast('Progress reset', 'warn'); go('home');
   };
+  // ---- download app: the browser's install prompt where there is one, otherwise the steps for this device
+  const dl = $('.dl-app'), dlTxt = $('.app-txt span');
+  const drawApp = () => {
+    if (!dl.isConnected) return;
+    const done = isInstalled();
+    dl.disabled = done;
+    dl.textContent = done ? '✔ App installed' : '📲 Download app';
+    dlTxt.textContent = done ? "You're playing in the app. It updates itself." : 'Play from your home screen or desktop, full screen. Free, and it updates itself.';
+  };
+  dl.onclick = async () => {
+    const r = await promptInstall();
+    if (r === 'accepted') toast('📲 Installing Whisker Wars...', 'good');
+    else if (r === 'manual') showInstallSteps();
+    drawApp();
+  };
+  drawApp();
+  return { leave: onInstallChange(drawApp) };
 };
+
+/** How to install on this device, for browsers without an install prompt (Safari on iPhone and iPad, Firefox...). */
+function showInstallSteps() {
+  const { title, steps } = installSteps();
+  const m = modal(`<div class="install-help">
+    <img class="ih-icon" src="icons/icon-192.png" alt="">
+    <h2>${title}</h2>
+    <ol>${steps.map(x => `<li>${x}</li>`).join('')}</ol>
+    <button class="btn primary ok">Got it</button></div>`);
+  $('.ok', m.el).onclick = m.close;
+}
 
 export function handleDeepLink() {
   const q = new URLSearchParams(location.search);
