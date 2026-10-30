@@ -36,8 +36,7 @@ export class Hud {
         <div class="pinfo">
           <div class="pname">${esc(P[i].name)}${P[i].ai ? ' <span class="tag">AI</span>' : ''}</div>
           <div class="phero">${h.name}</div>
-          <div class="pmeta"><span class="bcount" title="Buildings">🏠 0</span></div>
-          ${purrMeter(side)}
+          <div class="pmeta">${purrMeter(side)}<span class="bcount" title="Buildings">🏠 0</span></div>
         </div>
         <div class="emote-pop"></div>
       </div>`;
@@ -74,9 +73,8 @@ export class Hud {
           ${[0.25, 0.5, 0.75, 1].map((p, k) => `<button class="pct-btn" data-p="${p}">${p * 100}%<kbd>${'QWER'[k]}</kbd></button>`).join('')}
         </div>
         <div class="spellbar">
-          ${catnip}
+          <div class="sb-top">${catnip}<div class="passive" title="${esc(hero.passive.name + ': ' + hero.passive.desc)}">✦ ${hero.passive.name}</div></div>
           <div class="spells">${spellBtns}</div>
-          <div class="passive" title="${esc(hero.passive.name + ': ' + hero.passive.desc)}">✦ ${hero.passive.name}</div>
         </div>
         <div class="actions">
           <button class="emote-btn" title="Emotes (T)">😺</button>
@@ -146,7 +144,8 @@ export class Hud {
       } else {
         b.addEventListener('click', () => { audio.init(); this.m.selectSpell(slot); });
         b.addEventListener('pointerenter', () => this.showTip(slot, b));
-        b.addEventListener('pointerleave', () => this.els.tip.classList.add('hidden'));
+        // leaving a button brings back the tooltip of the skill you are aiming, if any
+        b.addEventListener('pointerleave', () => { const t = this.m.ui.targetingSlot; if (t >= 0) this.showTip(t, this.els.spells[t]); else this.els.tip.classList.add('hidden'); });
       }
     });
     const all = $('.all-btn');
@@ -154,6 +153,8 @@ export class Hud {
     $('.emote-btn').addEventListener('click', () => this.toggleEmotes());
     this.els.wheel.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { this.m.emote(b.dataset.e); this.closeEmotes(); }));
     $('.menu-btn').addEventListener('click', () => this.openPause());
+    // tap the modifier icons to see what they do (phones have no hover tooltips)
+    this.root.querySelectorAll('.rule-icons').forEach(el => el.addEventListener('click', () => this.toast(rules.map(r => `${r.icon} <b>${r.name}</b>: ${r.desc}`).join('<br>'))));
     this.bmenuFor = null;
   }
 
@@ -180,6 +181,22 @@ export class Hud {
     this.root.classList.toggle('portrait', !!portrait);
     this.root.classList.toggle('landscape', !portrait);
   }
+  /** desktop: the battlefield goes between the top bar (player cards) and the bottom bar (send %, spells) */
+  desktopPadding() {
+    const H = window.innerHeight;
+    const kids = s => [...this.root.querySelectorAll(s)].map(e => e.getBoundingClientRect()).filter(r => r.height > 0);
+    const top = kids('.hud-top > *'), bot = kids('.hud-bottom > *');
+    return {
+      top: Math.round((top.length ? Math.max(...top.map(r => r.bottom)) : 52) + 4),
+      bottom: Math.round(H - (bot.length ? Math.min(...bot.map(r => r.top)) : H - 76) + 4),
+      left: 6, right: 6,
+    };
+  }
+  /** desktop: the HUD panels buildings must stay clear of (the field may pass under the gaps between them) */
+  desktopPanels() {
+    const sel = ['.hud-top .pcard', '.hud-top .hud-center', '.hud-bottom .pct', '.hud-bottom .spellbar', '.hud-bottom .actions'];
+    return sel.flatMap(s => [...this.root.querySelectorAll(s)]).map(e => e.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+  }
   /** free space for the battlefield, measured from where the bars actually ended up */
   phonePadding() {
     const W = window.innerWidth, H = window.innerHeight;
@@ -198,11 +215,18 @@ export class Hud {
     const s = HERO_BY_ID[this.info.players[this.me].hero].spells[slot];
     const tip = this.els.tip;
     tip.innerHTML = `<div class="tt-h">${s.icon} ${s.name}</div><div class="tt-d">${s.desc}</div>
-      <div class="tt-m"><span>🌿 ${s.cost}</span><span>⏱ ${s.cd}s</span><span>🎯 ${TARGET_LABEL[s.target]}${s.radius ? '' : ''}</span></div>`;
+      <div class="tt-m"><span>🌿 ${s.cost}</span><span>⏱ ${s.cd}s</span><span>🎯 ${TARGET_LABEL[s.target]}</span>${this.phone ? '' : `<span class="tt-k">hotkey <kbd>${slot + 1}</kbd></span>`}</div>`;
     tip.classList.remove('hidden');
     const r = btn.getBoundingClientRect();
     tip.style.left = Math.max(8, Math.min(window.innerWidth - 268, r.left + r.width / 2 - 130)) + 'px';
     tip.style.bottom = (window.innerHeight - r.top + 10) + 'px';
+  }
+  /** desktop: briefly show a skill's tooltip (instant skills cast straight from a hotkey) */
+  pulseTip(slot) {
+    if (this.phone) return;
+    this.showTip(slot, this.els.spells[slot]);
+    clearTimeout(this.tipTimer);
+    this.tipTimer = setTimeout(() => this.els.tip.classList.add('hidden'), 1800);
   }
   flashSpell(slot, msg) {
     const b = this.els.spells[slot];
@@ -211,6 +235,8 @@ export class Hud {
   }
   setTargeting(slot) {
     this.els.spells.forEach((b, k) => b.classList.toggle('targeting', k === slot));
+    // desktop: picking a skill (mouse or hotkey) keeps its tooltip up until you cast or cancel
+    if (!this.phone) { clearTimeout(this.tipTimer); if (slot >= 0) this.showTip(slot, this.els.spells[slot]); else this.els.tip.classList.add('hidden'); }
     if (slot >= 0) {
       const s = HERO_BY_ID[this.info.players[this.me].hero].spells[slot];
       if (this.phone) this.hintMsg(`${s.icon} <b>${s.name}</b>: ${s.target === 'area' ? 'tap a spot' : 'tap a glowing building'}<div class="th-d">${s.desc}</div>`, () => this.m.cancelTargeting(), 'spell');

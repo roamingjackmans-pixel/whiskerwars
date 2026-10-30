@@ -37,29 +37,84 @@ export class Renderer {
     this.VW = WORLD_W; this.VH = WORLD_H;
     this.fit = null;          // optional rect (view coords) to zoom onto instead of the whole field
     this.phone = false;       // bigger labels, units and touch-friendly overlays
-    this.uiScale = 1; this.textScale = 1; this.unitScale = 1;
+    this.uiScale = 1; this.textScale = 1; this.unitScale = 1; this.artScale = 1;
+    this.fitPts = null;       // buildings to keep in view (with room for their art and badges)
     this.resize();
   }
 
   // ---------- setup ----------
   setPadding(p) { this.pad = { ...this.pad, ...p }; this.resize(); }
+  /**
+   * HUD panels (screen rectangles) that must not cover any building. With these set, the field may slide under
+   * the HUD bars wherever no building would be hidden, instead of keeping whole bands free.
+   */
+  setAvoid(rects) { this.avoid = rects && rects.length ? rects : null; this.resize(); }
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
     this.dpr = dpr; this.w = w; this.h = h;
     this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
-    const aw = Math.max(50, w - this.pad.left - this.pad.right), ah = Math.max(50, h - this.pad.top - this.pad.bottom);
-    const f = this.fit || { x0: 0, y0: 0, x1: this.VW, y1: this.VH };
+    let L = this.layoutFor(this.pad);
+    if (this.avoid && this.fitPts) {
+      // try smaller top/bottom margins and keep the biggest zoom that leaves every building clear of the HUD
+      const step = 8;
+      for (let pt = 4; pt < this.pad.top; pt += step) for (let pb = 4; pb < this.pad.bottom; pb += step) {
+        const c = this.layoutFor({ ...this.pad, top: pt, bottom: pb });
+        if (c.scale > L.scale * 1.005 && !this.hidesBuilding(c)) L = c;
+      }
+    }
+    this.fit = L.f;
+    this.view = { scale: L.scale, ox: L.ox, oy: L.oy };
+    Object.assign(this, this.sizesFor(L.scale));
+    if (this.bgInfo && Math.abs(L.scale * dpr - this.bgScale) / this.bgScale > 0.15) this.buildBackground();
+  }
+  /** Where the field goes inside the window minus `pad`. */
+  layoutFor(pad) {
+    const aw = Math.max(50, this.w - pad.left - pad.right), ah = Math.max(50, this.h - pad.top - pad.bottom);
+    let f = { x0: 0, y0: 0, x1: this.VW, y1: this.VH };
+    let scale = Math.max(0.12, Math.min(aw / this.VW, ah / this.VH));
+    if (this.fitPts && this.fitPts.length) {
+      // Zoom onto the buildings. How much room each one needs (its art above, its count badge below) depends on
+      // the zoom itself, because phones draw buildings and badges bigger when the field is small, so settle it
+      // in a few rounds. Every building, badge included, ends up inside the free area.
+      for (let round = 0; round < 5; round++) {
+        f = this.fitBox(scale);
+        scale = Math.max(0.12, Math.min(aw / (f.x1 - f.x0), ah / (f.y1 - f.y0)));
+      }
+    }
     const fw = f.x1 - f.x0, fh = f.y1 - f.y0;
-    const scale = Math.max(0.12, Math.min(aw / fw, ah / fh));
-    this.view = { scale, ox: this.pad.left + (aw - fw * scale) / 2 - f.x0 * scale, oy: this.pad.top + (ah - fh * scale) / 2 - f.y0 * scale };
-    // phones: keep numbers readable (~13px) however small the field gets
-    if (this.phone) {
-      this.uiScale = Math.max(1, Math.min(2.6, 13 / (15 * scale)));
-      this.textScale = 1 + (this.uiScale - 1) * 0.7;
-      this.unitScale = Math.max(1, Math.min(1.6, 0.62 / scale));
-    } else { this.uiScale = 1; this.textScale = 1; this.unitScale = 1; }
-    if (this.bgInfo && Math.abs(scale * dpr - this.bgScale) / this.bgScale > 0.15) this.buildBackground();
+    return { f, scale, ox: pad.left + (aw - fw * scale) / 2 - f.x0 * scale, oy: pad.top + (ah - fh * scale) / 2 - f.y0 * scale };
+  }
+  /** Would any building (art, ring or count badge) end up under a HUD panel with this layout? */
+  hidesBuilding(L) {
+    const { uiScale: k, artScale: a } = this.sizesFor(L.scale), m = 3;
+    for (const p of this.fitPts) {
+      const R = p.R * a, side = Math.max(R * 1.25, 21 * k) + 8, top = R * (p.tall ? 2.35 : 1.95) + 6, bottom = R * 0.62 + 22 * k + 6;
+      const x0 = L.ox + (p.x - side) * L.scale, x1 = L.ox + (p.x + side) * L.scale;
+      const y0 = L.oy + (p.y - top) * L.scale, y1 = L.oy + (p.y + bottom) * L.scale;
+      for (const r of this.avoid) if (x0 < r.right + m && x1 > r.left - m && y0 < r.bottom + m && y1 > r.top - m) return true;
+    }
+    return false;
+  }
+  /** Phones keep numbers readable (~13px) and buildings big enough to tap however small the field gets. */
+  sizesFor(scale) {
+    if (!this.phone) return { uiScale: 1, textScale: 1, unitScale: 1, artScale: 1 };
+    const uiScale = Math.max(1, Math.min(2.6, 13 / (15 * scale)));
+    return { uiScale, textScale: 1 + (uiScale - 1) * 0.7, unitScale: Math.max(1, Math.min(1.6, 0.62 / scale)), artScale: Math.max(1, Math.min(1.45, 0.58 / scale)) };
+  }
+  /** The part of the field to show at this zoom: every building with its art, selection ring and count badge. */
+  fitBox(scale) {
+    const { uiScale: k, artScale: a } = this.sizesFor(scale);
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of this.fitPts) {
+      const R = p.R * a;
+      const side = Math.max(R * 1.25, 21 * k) + 8;            // art / selection ring, or the badge if wider
+      const top = R * (p.tall ? 2.35 : 1.95) + 6;              // roof, flag, level pips
+      const bottom = R * 0.62 + 22 * k + 6;                    // count badge under the building
+      x0 = Math.min(x0, p.x - side); x1 = Math.max(x1, p.x + side);
+      y0 = Math.min(y0, p.y - top); y1 = Math.max(y1, p.y + bottom);
+    }
+    return { x0: Math.max(0, x0), y0: Math.max(0, y0), x1: Math.min(this.VW, x1), y1: Math.min(this.VH, y1) };
   }
   /**
    * view: { w, h, fwd(x, y) -> {x, y}, fit } maps world positions to what this player sees
@@ -84,15 +139,8 @@ export class Renderer {
     const pts = [...this.bpos.values()];
     this.bgInfo = pts.map(b => ({ x: b.x, y: b.y, radius: 44 }));
     this.terrain = { shapes: transformObstacles(this.info.map.obstacles || [], fwd), trails: this.trailRoutes() };
-    if (view && view.fit && pts.length) {
-      // zoom onto the buildings (room above for art + prediction pill, below for count badges)
-      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
-      const m = view.fit;
-      this.fit = {
-        x0: Math.max(0, Math.min(...xs) - m.side), x1: Math.min(this.VW, Math.max(...xs) + m.side),
-        y0: Math.max(0, Math.min(...ys) - m.top), y1: Math.min(this.VH, Math.max(...ys) + m.bottom),
-      };
-    } else this.fit = null;
+    // zoom onto the buildings (sized for their biggest upgrade, so the view doesn't need to change mid-battle)
+    this.fitPts = view && view.fit && pts.length ? pts.map(b => ({ x: b.x, y: b.y, R: b.r >= 50 ? b.r : Math.max(b.r || 40, 42), tall: (b.r || 0) >= 50 })) : null;
     this.parts.length = 0; this.timed.length = 0; this.decals.length = 0; this.projs.length = 0; this.hits.clear();
     this.bgScale = 0;
     this.resize();

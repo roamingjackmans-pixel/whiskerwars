@@ -125,7 +125,7 @@ export function recordMatch(r) {
     const c = r.win ? L.coinsWin : L.coinsLoss;
     lines.push([r.win ? `Beat ${L.name} AI` : `Battled ${L.name} AI`, c]); coins += c;
   }
-  const perf = Math.min(60, Math.round((st.captured || 0) * 2 + (st.spells || 0) * 1));
+  const perf = Math.min(COINS.perfMax, Math.round((st.captured || 0) * COINS.perfPerCapture + (st.spells || 0) * COINS.perfPerSpell));
   if (perf > 0) { lines.push(['Captures & spells bonus', perf]); coins += perf; }
   if (r.win && P.lastFirstWin !== today()) { P.lastFirstWin = today(); lines.push(['First win of the day!', COINS.firstWinOfDay]); coins += COINS.firstWinOfDay; }
   let stars = 0;
@@ -133,7 +133,7 @@ export function recordMatch(r) {
     stars = 1 + (r.time < 300 ? 1 : 0) + ((st.lostBuildings || 0) === 0 ? 1 : 0);
     const prev = P.campaign[r.level.id] || 0;
     if (!prev) { lines.push([`Level ${r.level.id} cleared!`, r.level.reward]); coins += r.level.reward; }
-    else if (stars > prev) { const c = 40 * (stars - prev); lines.push(['New star record', c]); coins += c; }
+    else if (stars > prev) { const c = COINS.newStar * (stars - prev); lines.push(['New star record', c]); coins += c; }
     P.campaign[r.level.id] = Math.max(prev, stars);
   }
 
@@ -154,7 +154,7 @@ export function recordMatch(r) {
   while (P.xp >= xpForLevel(P.level)) {
     P.xp -= xpForLevel(P.level);
     P.level++;
-    const bonus = 50 + P.level * 5;
+    const bonus = COINS.levelUpBase + P.level * COINS.levelUpPerLevel;
     levelUps.push({ level: P.level, coins: bonus });
     coins += bonus;
     lines.push([`Reached level ${P.level}!`, bonus]);

@@ -3,7 +3,7 @@
 import {
   WORLD_W, WORLD_H, TICK, BASE_SPEED, MAX_CATNIP, BASE_CATNIP_REGEN, START_CATNIP, TIME_LIMIT,
   OVERCAP_DECAY, SQUAD_CHUNK, PURR_PER_STAR, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR,
-  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, mulberry32,
+  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, TOWER_REGROW, mulberry32,
 } from './data.js';
 import { getNav } from './nav.js';
 
@@ -46,6 +46,9 @@ export class Game {
       prodAcc: 0, fireCd: 1 + this.rng(), fx: {}, hackBy: -1, lastHit: -9,
     }));
     if (this.rules.bigstart) for (const b of this.buildings) b.count *= 2;
+    // full: how many cats a building "should" have. Its owner sending cats out or spending them lowers it;
+    // enemy attacks don't, so a tower can grow back what it lost in a failed attack.
+    for (const b of this.buildings) b.full = b.count;
     this.byId = new Map(this.buildings.map(b => [b.id, b]));
     this.squads = [];
     this.nextSquad = 1;
@@ -201,6 +204,7 @@ export class Game {
       const n = Math.floor(from.count * pct);
       if (n < 1) continue;
       from.count -= n;
+      from.full = from.count;
       this.players[i].stats.sent += n;
       if (this.fx(from, 'shadowstep')) {
         from.fx.shadowstep = 0;
@@ -237,7 +241,7 @@ export class Game {
     if (b.level >= def.maxLevel) return this.err(i, 'Already max level!');
     const cost = this.upgradeCost(b);
     if (b.count < cost) return this.err(i, `Needs ${cost} cats to upgrade`);
-    b.count -= cost;
+    b.count -= cost; b.full = b.count;
     this.doUpgrade(b, i);
   }
   doUpgrade(b, i) {
@@ -253,7 +257,7 @@ export class Game {
     if (!b || b.owner !== i || !CONVERT_COST[c.to] || b.type === c.to || BUILDINGS[b.type].noConvert) return;
     const cost = this.convertCost(b, c.to);
     if (b.count < cost) return this.err(i, `Needs ${cost} cats to convert`);
-    b.count -= cost;
+    b.count -= cost; b.full = b.count;
     b.type = c.to; b.level = 1; b.fireCd = 1;
     this.emit({ k: 'conv', o: i, b: b.id, to: c.to });
   }
@@ -512,6 +516,7 @@ export class Game {
     let bonus = 0;
     if (this.passive(i, 'plunder')) p.catnip = Math.min(MAX_CATNIP, p.catnip + 8);
     if (this.passive(i, 'fortune') && this.rng() < 0.3) { b.count += 5; bonus = 5; }
+    b.full = b.count;
     this.emit({ k: 'cap', b: b.id, o: i, prev, bonus, spell: bySpell ? 1 : 0, down: down ? b.level : 0 });
   }
   fieldCombat() {
@@ -580,12 +585,24 @@ export class Game {
           const add = Math.min(rate * dt, cap - b.count);
           b.count += add;
           owner.stats.produced += add;
-        } else if (b.count > cap) {
+        } else if (b.count > cap && rate > 0) {
+          // over-full cottages and Cat Trees slowly lose the extra; towers, forges and gardens just hold what they have
           b.count = Math.max(cap, b.count - OVERCAP_DECAY * dt);
         }
         if (this.fx(b, 'curse')) {
           const n = Math.min(b.count, 1.5 * dt);
           b.count -= n; owner.stats.lost += n;
+        }
+      }
+      // a tower that fought off an attack grows back what it lost (strays too)
+      if (b.type === 'tower') {
+        if (b.count > b.full) b.full = b.count;
+        const target = Math.min(b.full, this.cap(b));
+        const halted = b.owner >= 0 && (this.fx(b, 'curse') || this.fx(b, 'disabled') || this.fx(b, 'frozen') || this.players[b.owner].eclipsed > t);
+        if (b.count < target && t - b.lastHit > TOWER_REGROW.delay && !halted) {
+          const add = Math.min(TOWER_REGROW.rate * dt, target - b.count);
+          b.count += add;
+          if (b.owner >= 0) this.players[b.owner].stats.produced += add;
         }
       }
       // towers

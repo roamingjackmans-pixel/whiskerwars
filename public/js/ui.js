@@ -1,7 +1,7 @@
 // Whisker Wars menus & screens.
 import {
   HEROES, HERO_BY_ID, CLANS, FURS, HATS, MAPS, MAP_BY_ID, THEMES, AI_LEVELS, CAMPAIGN, ACHIEVEMENTS, BUILDINGS, EMOTES,
-  randomMap, teamColor, RULES,
+  randomMap, teamColor, RULES, COINS,
 } from '../shared/data.js';
 import * as P from './profile.js';
 import { audio } from './audio.js';
@@ -29,7 +29,7 @@ let current = null;
 const state = { practice: { map: 'meadow', ai: 'normal', enemy: 'random', rules: {} }, lastCampaign: null };
 
 function rulesRow(rules, readonly) {
-  return `<div class="rules-row"><div class="rules-l">Fun modifiers${readonly ? ' <span class="muted small">(host picks)</span>' : ''}:</div>${RULES.map(r => `<button class="btn small rule-btn ${rules[r.id] ? 'on' : ''}" data-rule="${r.id}" title="${r.desc}" ${readonly ? 'disabled' : ''}>${r.icon} ${r.name}</button>`).join('')}</div>`;
+  return `<div class="rules-row"><div class="rules-l">Fun modifiers${readonly ? ' <span class="muted small">(host picks)</span>' : ''}:</div>${RULES.map(r => `<button class="btn small rule-btn ${rules[r.id] ? 'on' : ''}" data-rule="${r.id}" title="${r.desc}" ${readonly ? 'disabled' : ''}>${r.icon} ${r.name}<small>${r.desc}</small></button>`).join('')}</div>`;
 }
 
 // debug handle for testing in the browser console
@@ -385,7 +385,7 @@ function welcome() {
 }
 function dailyGift() {
   const m = modal(`<div class="daily"><div class="gift">🎁</div><h2>Daily Gift!</h2><p>The Cat Council sends you a basket of fish.</p>
-    <button class="btn primary big claim">Claim <span class="fish">🐟</span> 50</button></div>`, { close: false });
+    <button class="btn primary big claim">Claim <span class="fish">🐟</span> ${COINS.dailyGift}</button></div>`, { close: false });
   $('.claim', m.el).onclick = () => { const n = P.claimDaily(); audio.play('coins'); toast(`+${n} 🐟 fish coins!`, 'good'); m.close(); };
 }
 

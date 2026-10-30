@@ -25,7 +25,7 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | 12 heroes | 4 clans, each hero has a passive + 3 spells (36 spells), unlocked with fish coins earned by playing |
 | 5 building types | Kitten Cottage (5 levels), Scratch Tower, Yarn Forge, Catnip Garden, Grand Cat Tree. Upgrade or convert any time |
 | Maps | 19 maps: 6 open fields and 13 with terrain (ponds, rivers, islands joined by bridges, hedges, walls, snow ridges, dirt mounds) that make cats walk the long way round. Random maps get lumps and ponds too. Every map is point-symmetric, and both sides' roads are identical |
-| Core mechanics | Drag-to-send (the arrow shows the road your cats will take), swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy. A building taken from the other player drops one upgrade level |
+| Core mechanics | Drag-to-send (the arrow shows the road your cats will take), swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy. A building taken from the other player drops one upgrade level. Towers slowly grow back cats lost in a failed attack; towers, forges and gardens never shrink on their own |
 | Solo | 12-level campaign with 3-star ratings, practice vs 4 AI difficulties, live AI battle on the menu background |
 | Progression | Coins, XP & levels, daily gift, first-win bonus, 13 achievements, 15 furs + 12 hats (your whole army wears them), match history |
 | Polish | Procedural art, synthesized music & SFX, spell VFX, screen shake, keyboard shortcuts |

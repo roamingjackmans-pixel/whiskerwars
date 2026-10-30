@@ -135,7 +135,8 @@ export class Match {
       return { x: wx, y: wy };
     };
     this.fwd = fwd; this.inv = inv;
-    return { w: rotate ? H : W, h: rotate ? W : H, fwd, fit: this.phone ? { side: 78, top: 112, bottom: 84 } : null };
+    // every screen zooms onto the buildings so the battle fills as much of it as possible
+    return { w: rotate ? H : W, h: rotate ? W : H, fwd, fit: !this.attract };
   }
   applyPadding() {
     if (this.attract) { this.renderer.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); return; }
@@ -144,7 +145,9 @@ export class Match {
       this.renderer.setPadding(this.hud.phonePadding());
       return;
     }
-    this.renderer.setPadding(window.innerWidth < 700 ? { top: 46, bottom: 80, left: 2, right: 2 } : { top: 52, bottom: 76, left: 6, right: 6 });
+    // desktop: the field may slide under the HUD bars wherever that hides no building
+    this.renderer.avoid = this.hud ? this.hud.desktopPanels() : null;
+    this.renderer.setPadding(this.hud ? this.hud.desktopPadding() : { top: 52, bottom: 76, left: 6, right: 6 });
   }
 
   // ---------- lifecycle ----------
@@ -265,7 +268,7 @@ export class Match {
   buildView(a, b, u) {
     const pos = this.renderer.bpos;
     // phones draw buildings a little larger than their footprint so they are easy to see and tap
-    const art = this.phone ? Math.max(1, Math.min(1.45, 0.58 / this.renderer.view.scale)) : 1;
+    const art = this.renderer.artScale || 1;
     const buildings = [], byId = new Map();
     for (const arr of b.b) {
       const [id, owner, ti, level, count, fx, cap, hackBy] = arr;
@@ -456,7 +459,7 @@ export class Match {
     if (!P || P.cds[slot] > 0 || P.gcd > 0) { audio.play('error'); this.hud.flashSpell(slot, 'Recharging...'); return; }
     if (P.catnip < sp.cost) { audio.play('error'); this.hud.flashSpell(slot, 'Need more catnip!'); return; }
     this.closeMenu();
-    if (sp.target === 'global') { this.sendCmd({ k: 'spell', slot }); return; }
+    if (sp.target === 'global') { this.sendCmd({ k: 'spell', slot }); this.hud.pulseTip(slot); return; }
     this.ui.targeting = sp; this.ui.targetingSlot = slot;
     this.canvas.style.cursor = 'crosshair';
     this.hud.setTargeting(slot);

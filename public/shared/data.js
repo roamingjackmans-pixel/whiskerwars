@@ -60,6 +60,10 @@ export const BUILDINGS = {
     upgradeCost: [], defense: 1.3, radius: [56], noConvert: true,
   },
 };
+// A tower that fights off an attack slowly grows back the cats it lost, at a level-1 cottage's pace, starting
+// a few seconds after the last hit. Knocking a tower half down and walking away no longer leaves the other
+// player a cheap prize.
+export const TOWER_REGROW = { rate: BUILDINGS.cottage.prod[0], delay: 4 };
 // Prof. Purrcival's Auto-Turret spell bolts on a fixed-size hairball turret
 export const TURRET = { range: 195, fireEvery: 0.95 };
 // cost (in cats) to convert a building into another type (resets to level 1)
@@ -723,43 +727,43 @@ export function mulberry32(a) {
 
 // ---------------- AI difficulty ----------------
 export const AI_LEVELS = {
-  easy:   { name: 'Kitten',    think: 3.4, aggression: 0.3,  spellUse: 0.2,  upgrade: 0.25, mistakes: 0.4,  coinsWin: 40,  coinsLoss: 15, bonusProd: -0.25 },
-  normal: { name: 'House Cat', think: 2.0, aggression: 0.6,  spellUse: 0.55, upgrade: 0.55, mistakes: 0.15, coinsWin: 70,  coinsLoss: 25, bonusProd: -0.08 },
-  hard:   { name: 'Alley Boss', think: 1.0, aggression: 0.85, spellUse: 0.9, upgrade: 0.8,  mistakes: 0.04, coinsWin: 100, coinsLoss: 35, bonusProd: 0.05 },
-  insane: { name: 'Lion King', think: 0.5, aggression: 1.0,  spellUse: 1.0,  upgrade: 0.95, mistakes: 0.0,  coinsWin: 140, coinsLoss: 45, bonusProd: 0.2 },
+  easy:   { name: 'Kitten',    think: 3.4, aggression: 0.3,  spellUse: 0.2,  upgrade: 0.25, mistakes: 0.4,  coinsWin: 120, coinsLoss: 45,  bonusProd: -0.25 },
+  normal: { name: 'House Cat', think: 2.0, aggression: 0.6,  spellUse: 0.55, upgrade: 0.55, mistakes: 0.15, coinsWin: 210, coinsLoss: 75,  bonusProd: -0.08 },
+  hard:   { name: 'Alley Boss', think: 1.0, aggression: 0.85, spellUse: 0.9, upgrade: 0.8,  mistakes: 0.04, coinsWin: 300, coinsLoss: 105, bonusProd: 0.05 },
+  insane: { name: 'Lion King', think: 0.5, aggression: 1.0,  spellUse: 1.0,  upgrade: 0.95, mistakes: 0.0,  coinsWin: 420, coinsLoss: 135, bonusProd: 0.2 },
 };
 
 // ---------------- Campaign ----------------
 export const CAMPAIGN = [
-  { id: 1,  name: 'First Whiskers',    map: 'meadow',   ai: 'easy',   enemy: 'whiskers', reward: 100, tip: 'Drag from your cottage to a stray building to send cats.' },
-  { id: 2,  name: 'Tower Trouble',     map: 'rooftops', ai: 'easy',   enemy: 'mittens',  reward: 100, tip: 'Towers shoot cats walking past. Send a big group at once!' },
-  { id: 3,  name: 'Snowball Fight',    map: 'snowy',    ai: 'easy',   enemy: 'chef',     reward: 120, tip: 'Tap your cottage to upgrade it. Upgraded cottages make kittens faster.' },
-  { id: 4,  name: 'Garden Party',      map: 'moonlit',  ai: 'normal', enemy: 'duchess',  reward: 130, tip: 'Gardens refill your catnip faster. Spells win battles!' },
-  { id: 5,  name: 'Dockside Dash',     map: 'docks',    ai: 'normal', enemy: 'clawbeard',reward: 140, tip: 'Forges make all your cats hit harder.' },
-  { id: 6,  name: 'Sugar Rush',        map: 'candy',    ai: 'normal', enemy: 'neko',     reward: 150, tip: 'The Grand Cat Tree is worth fighting for.' },
-  { id: 7,  name: 'Ninja Night',       map: 'maze',     ai: 'hard',   enemy: 'shadow',   reward: 170, tip: 'Cats walk around hedges and ponds. Drag onto a building to see the road they will take.' },
-  { id: 8,  name: 'Chonk Wall',        map: 'ridge',    ai: 'hard',   enemy: 'chonk',    reward: 180, tip: 'Purr Power stars boost your whole army. Keep capturing!' },
-  { id: 9,  name: 'Space Race',        map: 'alleys',   ai: 'hard',   enemy: 'astro',    reward: 200, tip: 'Swipe across several of your buildings to send from all of them at once.' },
-  { id: 10, name: 'Mad Science',       map: 'archipelago', ai: 'hard', enemy: 'purrcival',reward: 220, tip: 'Bridges are chokepoints. Spread out so one area spell cannot hit everything.' },
-  { id: 11, name: 'Witching Hour',     map: 'chocoriver', ai: 'insane', enemy: 'luna',   reward: 250, tip: 'The enemy grows stronger. So do you. Convert buildings to change their job.' },
-  { id: 12, name: 'The Keyboard King', map: 'hedgerow', ai: 'insane', enemy: 'glitch',   reward: 400, tip: 'The final boss. Show them who the real top cat is!' },
+  { id: 1,  name: 'First Whiskers',    map: 'meadow',   ai: 'easy',   enemy: 'whiskers', reward: 300, tip: 'Drag from your cottage to a stray building to send cats.' },
+  { id: 2,  name: 'Tower Trouble',     map: 'rooftops', ai: 'easy',   enemy: 'mittens',  reward: 300, tip: 'Towers shoot cats walking past. Send a big group at once!' },
+  { id: 3,  name: 'Snowball Fight',    map: 'snowy',    ai: 'easy',   enemy: 'chef',     reward: 360, tip: 'Tap your cottage to upgrade it. Upgraded cottages make kittens faster.' },
+  { id: 4,  name: 'Garden Party',      map: 'moonlit',  ai: 'normal', enemy: 'duchess',  reward: 390, tip: 'Gardens refill your catnip faster. Spells win battles!' },
+  { id: 5,  name: 'Dockside Dash',     map: 'docks',    ai: 'normal', enemy: 'clawbeard',reward: 420, tip: 'Forges make all your cats hit harder.' },
+  { id: 6,  name: 'Sugar Rush',        map: 'candy',    ai: 'normal', enemy: 'neko',     reward: 450, tip: 'The Grand Cat Tree is worth fighting for.' },
+  { id: 7,  name: 'Ninja Night',       map: 'maze',     ai: 'hard',   enemy: 'shadow',   reward: 510, tip: 'Cats walk around hedges and ponds. Drag onto a building to see the road they will take.' },
+  { id: 8,  name: 'Chonk Wall',        map: 'ridge',    ai: 'hard',   enemy: 'chonk',    reward: 540, tip: 'Purr Power stars boost your whole army. Keep capturing!' },
+  { id: 9,  name: 'Space Race',        map: 'alleys',   ai: 'hard',   enemy: 'astro',    reward: 600, tip: 'Swipe across several of your buildings to send from all of them at once.' },
+  { id: 10, name: 'Mad Science',       map: 'archipelago', ai: 'hard', enemy: 'purrcival',reward: 660, tip: 'Bridges are chokepoints. Spread out so one area spell cannot hit everything.' },
+  { id: 11, name: 'Witching Hour',     map: 'chocoriver', ai: 'insane', enemy: 'luna',   reward: 750, tip: 'The enemy grows stronger. So do you. Convert buildings to change their job.' },
+  { id: 12, name: 'The Keyboard King', map: 'hedgerow', ai: 'insane', enemy: 'glitch',   reward: 1200, tip: 'The final boss. Show them who the real top cat is!' },
 ];
 
 // ---------------- Achievements ----------------
 export const ACHIEVEMENTS = [
-  { id: 'firstwin',   name: 'First Paw',        desc: 'Win your first match.',                     reward: 100 },
-  { id: 'online1',    name: 'Friendly Fire',    desc: 'Play an online match with a friend.',       reward: 100 },
-  { id: 'online5',    name: 'Neighborhood Boss',desc: 'Win 5 online matches.',                     reward: 250 },
-  { id: 'maxcottage', name: 'Dream House',      desc: 'Upgrade a cottage to level 5.',             reward: 100 },
-  { id: 'capture50',  name: 'Conqueror',        desc: 'Capture 50 buildings (total).',             reward: 150 },
-  { id: 'spells50',   name: 'Spell Slinger',    desc: 'Cast 50 spells (total).',                   reward: 150 },
-  { id: 'heroes5',    name: 'Cat Collector',    desc: 'Unlock 5 heroes.',                          reward: 250 },
-  { id: 'flawless',   name: 'Untouchable',      desc: 'Win without losing a single building.',     reward: 200 },
-  { id: 'speedy',     name: 'Zoomies',          desc: 'Win a match in under 3 minutes.',           reward: 200 },
-  { id: 'insane',     name: 'Lion Tamer',       desc: 'Beat the Lion King (Insane) AI.',           reward: 300 },
-  { id: 'campaign',   name: 'Legend of the Litter', desc: 'Finish the whole campaign.',            reward: 500 },
-  { id: 'fashion',    name: 'Cat Walk',         desc: 'Own 5 cosmetic items.',                     reward: 100 },
-  { id: 'army200',    name: 'Crazy Cat Lady',   desc: 'Have 200 cats at once.',                    reward: 150 },
+  { id: 'firstwin',   name: 'First Paw',        desc: 'Win your first match.',                     reward: 300 },
+  { id: 'online1',    name: 'Friendly Fire',    desc: 'Play an online match with a friend.',       reward: 300 },
+  { id: 'online5',    name: 'Neighborhood Boss',desc: 'Win 5 online matches.',                     reward: 750 },
+  { id: 'maxcottage', name: 'Dream House',      desc: 'Upgrade a cottage to level 5.',             reward: 300 },
+  { id: 'capture50',  name: 'Conqueror',        desc: 'Capture 50 buildings (total).',             reward: 450 },
+  { id: 'spells50',   name: 'Spell Slinger',    desc: 'Cast 50 spells (total).',                   reward: 450 },
+  { id: 'heroes5',    name: 'Cat Collector',    desc: 'Unlock 5 heroes.',                          reward: 750 },
+  { id: 'flawless',   name: 'Untouchable',      desc: 'Win without losing a single building.',     reward: 600 },
+  { id: 'speedy',     name: 'Zoomies',          desc: 'Win a match in under 3 minutes.',           reward: 600 },
+  { id: 'insane',     name: 'Lion Tamer',       desc: 'Beat the Lion King (Insane) AI.',           reward: 900 },
+  { id: 'campaign',   name: 'Legend of the Litter', desc: 'Finish the whole campaign.',            reward: 1500 },
+  { id: 'fashion',    name: 'Cat Walk',         desc: 'Own 5 cosmetic items.',                     reward: 300 },
+  { id: 'army200',    name: 'Crazy Cat Lady',   desc: 'Have 200 cats at once.',                    reward: 450 },
 ];
 
 export const RULES = [
@@ -769,4 +773,5 @@ export const RULES = [
   { id: 'bigstart', icon: '🏰', name: 'Big Start',      desc: 'Every building starts with double the cats.' },
 ];
 
-export const COINS = { onlineWin: 150, onlineLoss: 60, firstWinOfDay: 100, dailyGift: 50 };
+// fish coin income (tripled in v1.3)
+export const COINS = { onlineWin: 450, onlineLoss: 180, firstWinOfDay: 300, dailyGift: 150, perfMax: 180, perfPerCapture: 6, perfPerSpell: 3, newStar: 120, levelUpBase: 150, levelUpPerLevel: 15 };
