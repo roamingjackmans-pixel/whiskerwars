@@ -3,13 +3,44 @@ import { profile } from './profile.js';
 
 const setting = (k, d) => { const s = profile().settings || {}; return s[k] ?? d; };
 
-/** True when the phone layout should be used: a touch screen whose short side is phone-sized, or the user's choice. */
+/** True when the phone layout should be used: the user's choice, otherwise automatic detection. */
 export function isPhone() {
   const pref = setting('layout', 'auto');
   if (pref === 'phone') return true;
   if (pref === 'desktop') return false;
-  const coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
-  return !!coarse && Math.min(window.innerWidth, window.innerHeight) < 600;
+  return detectPhone();
+}
+
+/**
+ * Phone = a phone browser, or a touch screen whose physical short side is phone-sized.
+ * screen.* (not the window) is used so a phone in "Desktop site" mode, which fakes a ~980px wide window, still counts.
+ */
+export function detectPhone() {
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPod|Windows Phone|IEMobile|Opera Mini/i.test(ua)) return true;
+  if (/Android/i.test(ua) && /Mobile/i.test(ua)) return true;
+  const touch = (navigator.maxTouchPoints || 0) > 0 || (window.matchMedia && matchMedia('(pointer: coarse)').matches);
+  const short = Math.min(screen.width || 9999, screen.height || 9999);
+  return !!touch && short < 600;
+}
+
+/** A phone browser showing the "Desktop site" version (tiny text, faked wide window). */
+export function desktopSiteMode() {
+  const short = Math.min(screen.width || 9999, screen.height || 9999);
+  return detectPhone() && short < 600 && Math.min(window.innerWidth, window.innerHeight) > short * 1.4;
+}
+
+/** what the version panel shows about this device */
+export function deviceSummary() {
+  const touch = (navigator.maxTouchPoints || 0) > 0;
+  return {
+    layout: isPhone() ? 'phone' : 'desktop',
+    forced: setting('layout', 'auto') !== 'auto',
+    screen: `${screen.width}×${screen.height}`,
+    window: `${window.innerWidth}×${window.innerHeight}`,
+    touch,
+    desktopSite: desktopSiteMode(),
+  };
 }
 
 /** Portrait screens show the battlefield standing up so it can use the whole height. */

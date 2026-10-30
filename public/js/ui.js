@@ -9,7 +9,8 @@ import { Match } from './match.js';
 import { OnlineSession } from './online.js';
 import { detectServer, cleanCode } from './net.js';
 import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
-import { isPhone, applyDeviceClass, enterFullscreen, keepAwake } from './device.js';
+import { isPhone, applyDeviceClass, enterFullscreen, keepAwake, deviceSummary, desktopSiteMode } from './device.js';
+import { BUILD, isDev, versionLabel, fetchLatest, isNewer, reloadTo } from './update.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -86,6 +87,59 @@ export function go(name, params = {}) {
   if (res && res.leave) current.leave = res.leave;
   if (name === 'home' || name === 'friend') audio.music('menu');
   refreshTopbar();
+  renderUpdateBanner();
+}
+
+// ---------------------------------------------------------------- version & updates
+export const isBusy = () => !!(match || session);
+export const currentScreen = () => (current ? current.name : '');
+let pendingUpdate = null;
+let warnedDesktopSite = false;
+/** a newer build exists: show a banner in the menus (never during a battle) */
+export function offerUpdate(l) { pendingUpdate = l; renderUpdateBanner(); }
+function renderUpdateBanner() {
+  let b = document.querySelector('.update-banner');
+  if (!pendingUpdate || !current || current.name === 'match') { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('button');
+    b.className = 'update-banner silent';
+    b.onclick = () => { if (!match) reloadTo(pendingUpdate); };
+    document.body.appendChild(b);
+  }
+  b.innerHTML = `✨ New version <b>v${esc(pendingUpdate.version)}</b> is ready · <u>Update now</u>`;
+}
+function layoutLine(d) {
+  return d.layout === 'phone' ? `📱 Phone${d.forced ? ' (set in Settings)' : ' (detected)'}` : `🖥️ Computer / tablet${d.forced ? ' (set in Settings)' : ' (detected)'}`;
+}
+function versionBadge(corner = false) {
+  return `<button class="ver-badge silent${corner ? ' corner' : ''}" title="Version and device info">${versionLabel()} · ${isPhone() ? '📱' : '🖥️'}</button>`;
+}
+function wireVersionBadge(root = screens) { const b = $('.ver-badge', root); if (b) b.onclick = () => versionInfo(); }
+function versionInfo() {
+  const d = deviceSummary();
+  const m = modal(`<div class="ver-info">
+    <h2>🐾 Whisker Wars</h2>
+    <div class="ver-rows">
+      <div><span>Version</span><b>v${esc(BUILD.version)}</b></div>
+      <div><span>Build</span><b>${isDev() ? 'local test copy' : esc(BUILD.commit)}${BUILD.built ? ` · ${esc(BUILD.built)}` : ''}</b></div>
+      <div><span>Battle layout</span><b>${layoutLine(d)}</b></div>
+      <div><span>Screen</span><b>${d.screen}${d.touch ? ' · touch' : ''}</b></div>
+    </div>
+    ${d.desktopSite ? '<p class="ver-warn">Your browser is showing the <b>desktop site</b>. Turn off "Desktop site" in the browser menu for the best phone layout.</p>' : ''}
+    <div class="ver-status muted">Checking for updates...</div>
+    <div class="row center"><button class="btn small ver-layout">📱 Change layout</button><button class="btn primary small ver-done">Done</button></div>
+  </div>`, { cls: 'ver-modal' });
+  $('.ver-done', m.el).onclick = m.close;
+  $('.ver-layout', m.el).onclick = () => go('settings');
+  const st = $('.ver-status', m.el);
+  if (isDev()) { st.textContent = 'Local test copy: updates come from the live site.'; return; }
+  fetchLatest().then(l => {
+    if (!st.isConnected) return;
+    if (!l) { st.textContent = "Couldn't check for updates (offline?)."; return; }
+    if (!isNewer(l)) { st.innerHTML = '✅ You have the newest version.'; return; }
+    st.innerHTML = `✨ <b>v${esc(l.version)}</b> (${esc(l.commit)}) is available. <button class="btn primary small ver-up">Update now</button>`;
+    $('.ver-up', st).onclick = () => reloadTo(l);
+  });
 }
 
 function topbar(back = true, title = '') {
@@ -237,8 +291,14 @@ SCREENS.home = () => {
         <div><div class="hm-name">${esc(p.name)}</div><div class="hm-sub">Main hero: ${eq.name}</div></div>
       </div>
       <button class="btn icon settings-btn" data-go="settings" title="Settings">⚙️</button>
-    </div>`;
+    </div>
+    ${versionBadge(true)}`;
   wireGo();
+  wireVersionBadge();
+  if (desktopSiteMode() && !warnedDesktopSite) {
+    warnedDesktopSite = true;
+    setTimeout(() => toast('📱 Your browser is showing the <b>desktop site</b>. Turn off "Desktop site" in its menu for the phone layout.', 'warn'), 900);
+  }
   if (!p.seenTutorial) setTimeout(() => welcome(), 400);
   else if (P.dailyAvailable()) setTimeout(() => dailyGift(), 500);
 };
@@ -518,6 +578,7 @@ function beginMatch(opts) {
   modalRoot.innerHTML = '';
   if (current && current.leave) { current.leave('match'); current.leave = null; }
   current = { name: 'match' };
+  renderUpdateBanner();
   const st = P.profile().settings;
   // phones: hide the browser bars (Android) and keep the screen awake for the battle
   enterFullscreen();
@@ -849,6 +910,7 @@ SCREENS.settings = () => {
       <label>📳 Vibration on phones <input type="checkbox" class="c-vib" ${s.vibrate !== false ? 'checked' : ''}></label>
       <label>⛶ Full screen battles on phones <input type="checkbox" class="c-fs" ${s.fullscreen !== false ? 'checked' : ''}></label>
       <div class="net-info muted small"></div>
+      <div class="muted small">${versionBadge()}</div>
       <hr>
       <button class="btn danger small reset">Reset all progress</button>
     </div>`;
@@ -857,7 +919,11 @@ SCREENS.settings = () => {
   $('.r-music').oninput = ev => { P.setSetting('music', +ev.target.value); audio.setVolumes({ music: +ev.target.value }); };
   $('.c-mute').onchange = ev => { P.setSetting('muted', ev.target.checked); audio.setMuted(ev.target.checked); };
   $('.s-fx').onchange = ev => P.setSetting('fx', ev.target.value);
-  $('.s-layout').onchange = ev => { P.setSetting('layout', ev.target.value); applyDeviceClass(); };
+  $('.s-layout').onchange = ev => {
+    P.setSetting('layout', ev.target.value); applyDeviceClass();
+    const b = $('.ver-badge'); if (b) b.textContent = `${versionLabel()} · ${isPhone() ? '📱' : '🖥️'}`;
+  };
+  wireVersionBadge();
   $('.c-vib').onchange = ev => P.setSetting('vibrate', ev.target.checked);
   $('.c-fs').onchange = ev => P.setSetting('fullscreen', ev.target.checked);
   detectServer().then(u => { $('.net-info').textContent = u ? `Online play: game server (${u})` : 'Online play: direct peer-to-peer (PeerJS)'; });
