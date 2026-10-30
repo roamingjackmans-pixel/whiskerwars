@@ -28,7 +28,8 @@ export async function detectServer() {
   const s = FORCE_P2P ? 'p2p' : (cfg().server || 'auto');
   if (s === 'p2p' || s === 'none') return (detected = null);
   if (/^wss?:\/\//.test(s)) return (detected = s);
-  if (location.protocol === 'file:') return (detected = null);
+  // GitHub Pages only serves static files, so there is never a server to find there
+  if (location.protocol === 'file:' || /\.github\.io$/.test(location.hostname)) return (detected = null);
   // the server answers at <app folder>/api/health (or the site root)
   for (const rel of ['api/health', '/api/health']) {
     try {
