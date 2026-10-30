@@ -3,7 +3,7 @@
 import {
   WORLD_W, WORLD_H, TICK, BASE_SPEED, MAX_CATNIP, BASE_CATNIP_REGEN, START_CATNIP, TIME_LIMIT,
   OVERCAP_DECAY, SQUAD_CHUNK, PURR_PER_STAR, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR,
-  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, TOWER_REGROW, mulberry32,
+  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, TOWER_REGROW, STRAY_REGROW, strayRegrowRate, mulberry32,
 } from './data.js';
 import { getNav } from './nav.js';
 
@@ -595,15 +595,19 @@ export class Game {
           b.count -= n; owner.stats.lost += n;
         }
       }
-      // a tower that fought off an attack grows back what it lost (strays too)
-      if (b.type === 'tower') {
+      // an unowned building that fought off an attack grows back to the cats it started with (bigger ones faster)
+      if (b.owner < 0) {
+        if (b.count > b.full) b.full = b.count;
+        if (b.count < b.full && t - b.lastHit > STRAY_REGROW.delay) b.count = Math.min(b.full, b.count + strayRegrowRate(b.full) * dt);
+      } else if (b.type === 'tower') {
+        // your tower grows back what it lost at the normal kitten rate
         if (b.count > b.full) b.full = b.count;
         const target = Math.min(b.full, this.cap(b));
-        const halted = b.owner >= 0 && (this.fx(b, 'curse') || this.fx(b, 'disabled') || this.fx(b, 'frozen') || this.players[b.owner].eclipsed > t);
+        const halted = this.fx(b, 'curse') || this.fx(b, 'disabled') || this.fx(b, 'frozen') || this.players[b.owner].eclipsed > t;
         if (b.count < target && t - b.lastHit > TOWER_REGROW.delay && !halted) {
           const add = Math.min(TOWER_REGROW.rate * dt, target - b.count);
           b.count += add;
-          if (b.owner >= 0) this.players[b.owner].stats.produced += add;
+          this.players[b.owner].stats.produced += add;
         }
       }
       // towers
@@ -749,7 +753,7 @@ export class Game {
     };
     const snap = {
       t: r1(t * 10) / 10,
-      b: this.buildings.map(b => [b.id, b.owner, BTYPES.indexOf(b.type), b.level, r1(b.count), bfx(b), this.cap(b), b.hackBy]),
+      b: this.buildings.map(b => [b.id, b.owner, BTYPES.indexOf(b.type), b.level, r1(b.count), bfx(b), this.cap(b), b.hackBy, b.owner < 0 ? r1(b.full) : 0]),
       s: this.squads.map(s => [s.id, s.owner, Math.round(s.count * 10) / 10, Math.round(s.x), Math.round(s.y), sfx(s), s.to]),
       p: this.players.map(p => [
         r1(p.catnip), Math.round(p.purr), r1(p.cds[0]), r1(p.cds[1]), r1(p.cds[2]),

@@ -1,7 +1,7 @@
 // Whisker Wars match controller: runs/receives the simulation, handles input, feeds renderer + HUD.
 import { Game, radiusOf, BFX, SFX } from '../shared/game.js';
 import { AI } from '../shared/ai.js';
-import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, BASE_SPEED, WORLD_W, WORLD_H } from '../shared/data.js';
+import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, BASE_SPEED, WORLD_W, WORLD_H, strayRegrowRate } from '../shared/data.js';
 import { Renderer, spellTargetOk } from './render.js';
 import { Hud } from './hud.js';
 import { audio } from './audio.js';
@@ -279,12 +279,12 @@ export class Match {
     const art = this.renderer.artScale || 1;
     const buildings = [], byId = new Map();
     for (const arr of b.b) {
-      const [id, owner, ti, level, count, fx, cap, hackBy] = arr;
+      const [id, owner, ti, level, count, fx, cap, hackBy, full] = arr;
       const p = pos.get(id);
       const prev = a._b.get(id);
       const c = prev && prev[1] === owner ? prev[4] + (count - prev[4]) * u : count;
       const type = BTYPES[ti];
-      const o = { id, x: p.x, y: p.y, owner, type, level, count: c, fx, cap, hackBy, radius: radiusOf(type, level) * art };
+      const o = { id, x: p.x, y: p.y, owner, type, level, count: c, fx, cap, hackBy, full: full || 0, radius: radiusOf(type, level) * art };
       buildings.push(o); byId.set(id, o);
     }
     const squads = [], squadById = new Map();
@@ -422,6 +422,9 @@ export class Match {
           if (tb.owner >= 0) {
             const prod = BUILDINGS[tb.type].prod[tb.level - 1] || 0;
             if (prod > 0 && tb.count < tb.cap) defenders = Math.min(tb.cap, tb.count + prod * walk / this.estSpeed(V));
+          } else if (tb.full > tb.count) {
+            // a stray you already hurt grows back while you walk
+            defenders = Math.min(tb.full, tb.count + strayRegrowRate(tb.full) * walk / this.estSpeed(V));
           }
           const need = defenders * this.estDefense(tb) / this.estAttack(V);
           const good = n > need + 0.3;

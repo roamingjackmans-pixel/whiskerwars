@@ -64,6 +64,11 @@ export const BUILDINGS = {
 // a few seconds after the last hit. Knocking a tower half down and walking away no longer leaves the other
 // player a cheap prize.
 export const TOWER_REGROW = { rate: BUILDINGS.cottage.prod[0], delay: 4 };
+// An unowned building (cottage, tower, Cat Tree...) that fought off an attack grows back to the cats it started with,
+// a few seconds after the fighting stops. Bigger garrisons refill faster: a full refill takes about 24 s at any size
+// (an 8-cat cottage gets back ~0.33 cats/s, a 20-cat one ~0.83, a 45-cat Cat Tree ~1.9).
+export const STRAY_REGROW = { refill: 24, min: 0.3, delay: 4 };
+export const strayRegrowRate = full => Math.max(STRAY_REGROW.min, full / STRAY_REGROW.refill);
 // Prof. Purrcival's Auto-Turret spell bolts on a fixed-size hairball turret
 export const TURRET = { range: 195, fireEvery: 0.95 };
 // cost (in cats) to convert a building into another type (resets to level 1)
@@ -863,20 +868,20 @@ MAPS.push(
       { x: 1170, y: 250, type: 'tower', count: 13 },
       { x: 1170, y: 650, type: 'tower', count: 13 },
       { x: 520, y: 170, type: 'cottage', level: 2, owner: 0, count: 20 },
-      { x: 270, y: 110, type: 'cottage', count: 10 },
+      { x: 270, y: 110, type: 'cottage', count: 11 },
       { x: 310, y: 330, type: 'cottage', count: 14 },
-      { x: 100, y: 260, type: 'cottage', count: 11 },
+      { x: 100, y: 260, type: 'cottage', count: 12 },
       { x: 720, y: 330, type: 'tower', count: 18 },
       { x: 110, y: 90, type: 'garden', count: 15 },
       { x: 470, y: 745, type: 'cottage', level: 2, owner: 2, count: 20 },
       { x: 230, y: 790, type: 'cottage', count: 6 },
       { x: 290, y: 600, type: 'cottage', count: 7 },
-      { x: 100, y: 660, type: 'cottage', count: 7 },
-      { x: 680, y: 610, type: 'tower', count: 10 },
-      { x: 720, y: 820, type: 'garden', count: 9 },
+      { x: 100, y: 660, type: 'cottage', count: 6 },
+      { x: 680, y: 610, type: 'tower', count: 9 },
+      { x: 720, y: 820, type: 'garden', count: 8 },
       { x: 945, y: 460, type: 'cattree', count: 40 },
       { x: 1000, y: 120, type: 'forge', count: 18 },
-      { x: 1000, y: 800, type: 'forge', count: 11 },
+      { x: 1000, y: 800, type: 'forge', count: 10 },
     ]),
     obstacles: [
       hedge([[840, 462], [520, 466], [170, 476]]),

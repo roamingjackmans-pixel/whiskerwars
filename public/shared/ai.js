@@ -1,5 +1,5 @@
 // Whisker Wars - computer opponent. Runs on the authority, issues normal commands.
-import { BUILDINGS, AI_LEVELS, BASE_SPEED } from './data.js';
+import { BUILDINGS, AI_LEVELS, BASE_SPEED, STRAY_REGROW, strayRegrowRate } from './data.js';
 
 // buildings are compared by how far a cat has to WALK (around ponds, walls and mounds), not as the crow flies
 
@@ -140,7 +140,9 @@ export class AI {
         gathered += s.avail;
         maxD = Math.max(maxD, s.d);
         const eta = maxD / BASE_SPEED;
-        const prod = tg.owner >= 0 ? (BUILDINGS[tg.type].prod[tg.level - 1] || 0) * eta : 0;
+        // owned buildings keep making kittens; strays that were hit grow back once the fighting stops
+        const prod = tg.owner >= 0 ? (BUILDINGS[tg.type].prod[tg.level - 1] || 0) * eta
+          : tg.count < tg.full ? Math.min(tg.full - tg.count, strayRegrowRate(tg.full) * Math.max(0, eta - Math.max(0, STRAY_REGROW.delay - (g.time - tg.lastHit)))) : 0;
         const theirReinf = this.reinf.get(tg.id) || 0;
         const already = [...g.squads].filter(q => q.owner === me && q.to === tg.id).reduce((a, q) => a + q.count, 0);
         let need = ((tg.count + prod + theirReinf) * def / atk) * (1.12 + (1 - aggr) * 0.35) + 2 + this.towerLoss(s.b, tg) - already;
