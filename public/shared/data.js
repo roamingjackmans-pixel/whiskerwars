@@ -107,7 +107,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'shadow', name: 'Shadow', title: 'Ninja of the Night Roofs', clan: 'alley', cost: 300, fur: 'black',
+    id: 'shadow', name: 'Shadow', title: 'Ninja of the Night Roofs', clan: 'alley', cost: 750, fur: 'black',
     blurb: 'You never see Shadow coming. Neither do the towers.',
     passive: { id: 'lightpaws', name: 'Light Paws', desc: 'Your cats move 20% faster.' },
     spells: [
@@ -120,7 +120,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'chef', name: 'Chef Pawtisserie', title: 'Master of the Fish Kitchen', clan: 'royal', cost: 400, fur: 'cream',
+    id: 'chef', name: 'Chef Pawtisserie', title: 'Master of the Fish Kitchen', clan: 'royal', cost: 3000, fur: 'cream',
     blurb: 'An army marches on its stomach. Chef keeps every belly full.',
     passive: { id: 'wellfed', name: 'Well Fed', desc: 'Your buildings hold 20% more cats.' },
     spells: [
@@ -133,7 +133,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'chonk', name: 'Sgt. Chonk', title: 'The Unmovable', clan: 'alley', cost: 500, fur: 'orange',
+    id: 'chonk', name: 'Sgt. Chonk', title: 'The Unmovable', clan: 'alley', cost: 5000, fur: 'orange',
     blurb: 'Twenty-two pounds of pure determination.',
     passive: { id: 'bigboned', name: 'Big Boned', desc: 'Your buildings take 15% less damage.' },
     spells: [
@@ -146,7 +146,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'duchess', name: 'Duchess Fluffington', title: 'Heiress of the Velvet Cushion', clan: 'royal', cost: 650, fur: 'persian',
+    id: 'duchess', name: 'Duchess Fluffington', title: 'Heiress of the Velvet Cushion', clan: 'royal', cost: 7000, fur: 'persian',
     blurb: 'Why fight when you can simply... buy the kingdom?',
     passive: { id: 'pampered', name: 'Pampered', desc: 'Your cottages make kittens 8% faster.' },
     spells: [
@@ -159,7 +159,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'clawbeard', name: 'Captain Clawbeard', title: 'Terror of the Fish Docks', clan: 'alley', cost: 800, fur: 'calico',
+    id: 'clawbeard', name: 'Captain Clawbeard', title: 'Terror of the Fish Docks', clan: 'alley', cost: 9500, fur: 'calico',
     blurb: 'Arrr. Every building is treasure if you claw hard enough.',
     passive: { id: 'plunder', name: 'Plunder', desc: 'Capturing a building gives you +8 catnip.' },
     spells: [
@@ -172,7 +172,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'neko', name: 'Neko-chan', title: 'The Lucky Charm', clan: 'mystic', cost: 1000, fur: 'maneki',
+    id: 'neko', name: 'Neko-chan', title: 'The Lucky Charm', clan: 'mystic', cost: 11500, fur: 'maneki',
     blurb: 'One wave of her paw and fortune smiles on you.',
     passive: { id: 'fortune', name: 'Fortune', desc: 'Each capture has a 30% chance to grant +5 bonus cats.' },
     spells: [
@@ -185,7 +185,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'astro', name: 'Astro', title: 'First Cat on the Moon', clan: 'tech', cost: 1200, fur: 'siamese',
+    id: 'astro', name: 'Astro', title: 'First Cat on the Moon', clan: 'tech', cost: 13500, fur: 'siamese',
     blurb: 'Astro has seen the stars. Now the stars fight for Astro.',
     passive: { id: 'starcharts', name: 'Star Charts', desc: 'Your towers reach 25% farther and fire 25% faster. Your cats move 8% faster.' },
     spells: [
@@ -198,7 +198,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'purrcival', name: 'Prof. Purrcival', title: 'Inventor Extraordinaire', clan: 'tech', cost: 1400, fur: 'graytabby',
+    id: 'purrcival', name: 'Prof. Purrcival', title: 'Inventor Extraordinaire', clan: 'tech', cost: 15500, fur: 'graytabby',
     blurb: 'His gadgets are 90% genius and 10% explosion.',
     passive: { id: 'engineering', name: 'Engineering', desc: 'Upgrades and conversions cost 25% fewer cats.' },
     spells: [
@@ -211,7 +211,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'luna', name: 'Luna', title: 'Witch of the Silver Moon', clan: 'mystic', cost: 1700, fur: 'void',
+    id: 'luna', name: 'Luna', title: 'Witch of the Silver Moon', clan: 'mystic', cost: 18000, fur: 'void',
     blurb: 'Cats have nine lives. Luna knows where the other eight went.',
     passive: { id: 'ninelives', name: 'Nine Lives', desc: '12% of your cats knocked out in battle return to your nearest building.' },
     spells: [
@@ -224,7 +224,7 @@ export const HEROES = [
     ],
   },
   {
-    id: 'glitch', name: 'Glitch', title: 'The Keyboard Cat', clan: 'tech', cost: 2000, fur: 'tuxedo',
+    id: 'glitch', name: 'Glitch', title: 'The Keyboard Cat', clan: 'tech', cost: 20000, fur: 'tuxedo',
     blurb: 'Sits on your keyboard. Sits on your network. Sits on your towers.',
     passive: { id: 'overclock', name: 'Overclock', desc: 'Your spell cooldowns are 25% shorter.' },
     spells: [
