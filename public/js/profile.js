@@ -22,7 +22,7 @@ function fresh() {
     campaign: {},
     history: [],
     lastDaily: '', lastFirstWin: '',
-    settings: { sfx: 0.8, music: 0.45, muted: false, fx: 'high', showTips: true },
+    settings: { sfx: 0.8, music: 0.45, muted: false, fx: 'high', showTips: true, layout: 'auto', vibrate: true, fullscreen: true },
     seenTutorial: false,
   };
 }

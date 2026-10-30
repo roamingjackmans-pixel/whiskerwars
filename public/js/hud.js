@@ -2,7 +2,7 @@
 import { HERO_BY_ID, BUILDINGS, CONVERT_COST, EMOTES, MAX_CATNIP, RULES, teamColor, findSpell } from '../shared/data.js';
 import { heroPortraitURL } from './art.js';
 import { audio } from './audio.js';
-import { profile, setSetting } from './profile.js';
+import { profile, setSetting, save as saveProfile } from './profile.js';
 
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const fmtTime = s => { s = Math.max(0, Math.ceil(s)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
@@ -38,17 +38,28 @@ export class Hud {
       </div>`;
     };
     const hero = HERO_BY_ID[P[me].hero];
-    this.root.innerHTML = `
+    const phone = this.phone = !!this.m.phone;
+    if (phone) this.root.classList.add('phone');
+    const rules = RULES.filter(r => info.rules && info.rules[r.id]);
+    const ruleIcons = rules.length ? `<div class="rule-icons">${rules.map(r => `<span title="${r.name}: ${r.desc}">${r.icon}</span>`).join('')}</div>` : '';
+    const armybar = `<div class="armybar" title="Total cats (yours vs theirs)">
+            <div class="fill me" style="background:${teamColor(me).main}"></div>
+            <div class="fill opp" style="background:${teamColor(opp).main}"></div>
+            <span class="l">0</span><span class="r">0</span>
+          </div>`;
+    const spellBtns = hero.spells.map((s, k) => `<button class="spell" data-slot="${k}">
+              <span class="sicon">${s.icon}</span><span class="scost">${s.cost}</span>
+              <div class="scd"></div><span class="scdtxt"></span>${phone ? '' : `<kbd>${k + 1}</kbd>`}</button>`).join('');
+    const catnip = `<div class="catnip" title="Catnip: spell energy. Gardens make it faster.">
+            <div class="catnip-fill"></div><span class="catnip-txt">🌿 0</span>
+          </div>`;
+    const desktop = `
       <div class="hud-top">
         ${card(me, 'me')}
         <div class="hud-center">
           <div class="timer">--:--</div>
-          ${RULES.filter(r => info.rules && info.rules[r.id]).length ? `<div class="rule-icons">${RULES.filter(r => info.rules[r.id]).map(r => `<span title="${r.name}: ${r.desc}">${r.icon}</span>`).join('')}</div>` : ''}
-          <div class="armybar" title="Total cats (yours vs theirs)">
-            <div class="fill me" style="background:${teamColor(me).main}"></div>
-            <div class="fill opp" style="background:${teamColor(opp).main}"></div>
-            <span class="l">0</span><span class="r">0</span>
-          </div>
+          ${ruleIcons}
+          ${armybar}
         </div>
         ${card(opp, 'opp')}
       </div>
@@ -58,21 +69,44 @@ export class Hud {
           ${[0.25, 0.5, 0.75, 1].map((p, k) => `<button class="pct-btn" data-p="${p}">${p * 100}%<kbd>${'QWER'[k]}</kbd></button>`).join('')}
         </div>
         <div class="spellbar">
-          <div class="catnip" title="Catnip: spell energy. Gardens make it faster.">
-            <div class="catnip-fill"></div><span class="catnip-txt">🌿 0</span>
-          </div>
-          <div class="spells">
-            ${hero.spells.map((s, k) => `<button class="spell" data-slot="${k}">
-              <span class="sicon">${s.icon}</span><span class="scost">${s.cost}</span>
-              <div class="scd"></div><span class="scdtxt"></span><kbd>${k + 1}</kbd></button>`).join('')}
-          </div>
+          ${catnip}
+          <div class="spells">${spellBtns}</div>
           <div class="passive" title="${esc(hero.passive.name + ': ' + hero.passive.desc)}">✦ ${hero.passive.name}</div>
         </div>
         <div class="actions">
           <button class="emote-btn" title="Emotes (T)">😺</button>
           <button class="menu-btn" title="Menu">☰</button>
         </div>
+      </div>`;
+    // Phones: slim top bar and a thumb dock at the bottom (CSS arranges both for portrait or landscape).
+    const phoneHtml = `
+      <div class="ph-top">
+        ${card(me, 'me')}
+        <div class="hud-center">
+          <div class="timer">--:--</div>
+          ${armybar}
+        </div>
+        ${card(opp, 'opp')}
+        ${ruleIcons}
       </div>
+      <div class="ph-dock">
+        <div class="pct">${[0.25, 0.5, 0.75, 1].map(p => `<button class="pct-btn" data-p="${p}">${p * 100}<small>%</small></button>`).join('')}</div>
+        <div class="ph-row">
+          <div class="mystat">
+            <span class="stars" title="Purr Power">☆☆☆☆☆</span><span class="bcount">🏠 0</span>
+            ${catnip}
+            <div class="emote-pop"></div>
+          </div>
+          <button class="all-btn" aria-label="Select all your buildings">🐾<span>ALL</span></button>
+          <div class="spells">${spellBtns}</div>
+          <div class="ph-actions">
+            <button class="emote-btn" aria-label="Emotes">😺</button>
+            <button class="menu-btn" aria-label="Menu">☰</button>
+          </div>
+        </div>
+      </div>`;
+    this.root.innerHTML = `
+      ${phone ? phoneHtml : desktop}
       <div class="emote-wheel hidden">${EMOTES.map(e => `<button data-e="${e.id}" title="${e.text}">${e.icon}</button>`).join('')}</div>
       <div class="bmenu hidden"></div>
       <div class="spell-tip hidden"></div>
@@ -87,17 +121,30 @@ export class Hud {
     this.els = {
       timer: $('.timer'), fillMe: $('.armybar .fill.me'), fillOpp: $('.armybar .fill.opp'), armyL: $('.armybar .l'), armyR: $('.armybar .r'),
       catFill: $('.catnip-fill'), catTxt: $('.catnip-txt'), spells: [...this.root.querySelectorAll('.spell')],
-      starsMe: $('.pcard.me .stars'), starsOpp: $('.pcard.opp .stars'), bMe: $('.pcard.me .bcount'), bOpp: $('.pcard.opp .bcount'),
+      starsMe: [...this.root.querySelectorAll('.pcard.me .stars, .mystat .stars')], starsOpp: $('.pcard.opp .stars'),
+      bMe: [...this.root.querySelectorAll('.pcard.me .bcount, .mystat .bcount')], bOpp: $('.pcard.opp .bcount'),
       toasts: $('.toasts'), bmenu: $('.bmenu'), tip: $('.spell-tip'), wheel: $('.emote-wheel'), hint: $('.targeting-hint'), ping: $('.ping'),
     };
     this.root.querySelectorAll('.pct-btn').forEach(b => b.addEventListener('click', () => this.m.setPct(+b.dataset.p)));
     this.setPct(this.m.pct);
     this.els.spells.forEach(b => {
       const slot = +b.dataset.slot;
-      b.addEventListener('click', () => { audio.init(); this.m.selectSpell(slot); });
-      b.addEventListener('pointerenter', () => this.showTip(slot, b));
-      b.addEventListener('pointerleave', () => this.els.tip.classList.add('hidden'));
+      if (this.phone) {
+        // phones: tap to cast, press and hold to read what the spell does
+        let timer = null, held = false;
+        b.addEventListener('pointerdown', () => { held = false; timer = setTimeout(() => { held = true; this.showTip(slot, b); }, 420); });
+        const end = () => { clearTimeout(timer); if (held) setTimeout(() => this.els.tip.classList.add('hidden'), 1400); };
+        b.addEventListener('pointerup', end); b.addEventListener('pointercancel', end); b.addEventListener('pointerleave', end);
+        b.addEventListener('contextmenu', ev => ev.preventDefault());
+        b.addEventListener('click', ev => { if (held) { ev.preventDefault(); held = false; return; } audio.init(); this.m.selectSpell(slot); });
+      } else {
+        b.addEventListener('click', () => { audio.init(); this.m.selectSpell(slot); });
+        b.addEventListener('pointerenter', () => this.showTip(slot, b));
+        b.addEventListener('pointerleave', () => this.els.tip.classList.add('hidden'));
+      }
     });
+    const all = $('.all-btn');
+    if (all) all.addEventListener('click', () => { audio.init(); this.m.toggleAll(); });
     $('.emote-btn').addEventListener('click', () => this.toggleEmotes());
     this.els.wheel.querySelectorAll('button').forEach(b => b.addEventListener('click', () => { this.m.emote(b.dataset.e); this.closeEmotes(); }));
     $('.menu-btn').addEventListener('click', () => this.openPause());
@@ -105,6 +152,42 @@ export class Hud {
   }
 
   setPct(p) { this.root.querySelectorAll('.pct-btn').forEach(b => b.classList.toggle('on', +b.dataset.p === p)); }
+  setAll(on) {
+    const b = this.root.querySelector('.all-btn');
+    if (b) b.classList.toggle('on', on);
+    if (on) this.hintMsg('🐾 <b>All buildings</b> selected: tap a target', () => this.m.setAll(false));
+    else if (this.hintKind === 'all') this.hintMsg(null);
+  }
+
+  /** first few phone battles: a one-line reminder of how to send cats */
+  coach() {
+    const p = profile();
+    const n = p.phoneHints || 0;
+    if (n >= 3 || p.settings.showTips === false) return;
+    p.phoneHints = n + 1; saveProfile();
+    this.hintMsg('👆 <b>Drag</b> from your building to another to send cats, or <b>tap</b> yours then the target', () => this.hintMsg(null), 'coach');
+    setTimeout(() => { if (this.hintKind === 'coach') this.hintMsg(null); }, 7000);
+  }
+
+  // ---------- phone layout ----------
+  layoutPhone(portrait) {
+    this.root.classList.toggle('portrait', !!portrait);
+    this.root.classList.toggle('landscape', !portrait);
+  }
+  /** free space for the battlefield, measured from where the bars actually ended up */
+  phonePadding() {
+    const W = window.innerWidth, H = window.innerHeight;
+    const r = s => { const e = this.root.querySelector(s); return e ? e.getBoundingClientRect() : null; };
+    const top = r('.ph-top'), dock = r('.ph-dock');
+    if (this.root.classList.contains('portrait')) {
+      return { top: Math.round((top ? top.bottom : 50) + 2), bottom: Math.round(H - (dock ? dock.top : H - 130) + 2), left: 2, right: 2 };
+    }
+    const lefts = ['.ph-dock .pct', '.all-btn'].map(r).filter(Boolean);
+    const rights = ['.ph-dock .spells', '.mystat', '.ph-actions'].map(r).filter(Boolean);
+    const leftEdge = Math.max(0, ...lefts.map(x => x.right));
+    const rightEdge = Math.min(W, ...rights.map(x => x.left));
+    return { top: Math.round((top ? top.bottom : 40) + 2), bottom: 4, left: Math.round(leftEdge + 4), right: Math.round(W - rightEdge + 4) };
+  }
   showTip(slot, btn) {
     const s = HERO_BY_ID[this.info.players[this.me].hero].spells[slot];
     const tip = this.els.tip;
@@ -124,9 +207,19 @@ export class Hud {
     this.els.spells.forEach((b, k) => b.classList.toggle('targeting', k === slot));
     if (slot >= 0) {
       const s = HERO_BY_ID[this.info.players[this.me].hero].spells[slot];
-      this.els.hint.innerHTML = `${s.icon} <b>${s.name}</b> — ${s.target === 'area' ? 'tap a spot on the map' : 'tap a glowing building'} <span>(right-click / Esc to cancel)</span>`;
-      this.els.hint.classList.remove('hidden');
-    } else this.els.hint.classList.add('hidden');
+      if (this.phone) this.hintMsg(`${s.icon} <b>${s.name}</b>: ${s.target === 'area' ? 'tap a spot' : 'tap a glowing building'}<div class="th-d">${s.desc}</div>`, () => this.m.cancelTargeting(), 'spell');
+      else this.hintMsg(`${s.icon} <b>${s.name}</b> — ${s.target === 'area' ? 'tap a spot on the map' : 'tap a glowing building'} <span>(right-click / Esc to cancel)</span>`, null, 'spell');
+    } else if (this.hintKind === 'spell') this.hintMsg(null);
+  }
+  /** one hint bar above the controls; phones get a ✕ because there is no Esc key or right-click */
+  hintMsg(html, onCancel, kind = 'all') {
+    const h = this.els.hint;
+    if (!html) { h.classList.add('hidden'); this.hintKind = null; return; }
+    this.hintKind = kind;
+    h.innerHTML = `<span class="th-t">${html}</span>${onCancel && this.phone ? '<button class="th-x" aria-label="Cancel">✕</button>' : ''}`;
+    const x = h.querySelector('.th-x');
+    if (x) x.onclick = ev => { ev.stopPropagation(); onCancel(); };
+    h.classList.remove('hidden');
   }
 
   update(V, dt) {
@@ -145,10 +238,10 @@ export class Hud {
     this.els.fillOpp.style.width = (op.army / tot * 100) + '%';
     this.els.armyL.textContent = me.army; this.els.armyR.textContent = op.army;
     const stars = n => '★'.repeat(n) + '☆'.repeat(5 - n);
-    this.els.starsMe.textContent = stars(me.stars); this.els.starsOpp.textContent = stars(op.stars);
+    this.els.starsMe.forEach(e => { e.textContent = stars(me.stars); }); this.els.starsOpp.textContent = stars(op.stars);
     let bm = 0, bo = 0;
     for (const b of V.buildings) { if (b.owner === this.me) bm++; else if (b.owner === this.opp) bo++; }
-    this.els.bMe.textContent = '🏠 ' + bm; this.els.bOpp.textContent = '🏠 ' + bo;
+    this.els.bMe.forEach(e => { e.textContent = '🏠 ' + bm; }); this.els.bOpp.textContent = '🏠 ' + bo;
     this.els.catFill.style.width = (me.catnip / MAX_CATNIP * 100) + '%';
     this.els.catTxt.textContent = '🌿 ' + Math.floor(me.catnip);
     const hero = HERO_BY_ID[this.info.players[this.me].hero];
@@ -180,7 +273,10 @@ export class Hud {
       case 'err': if (e.o === me) this.toast(e.msg, 'warn'); break;
       case 'star': if (e.o === me) this.toast(`⭐ Purr Power ${'★'.repeat(e.n)} — your cats get stronger!`, 'mine'); break;
       case 'emote': {
-        const card = this.root.querySelector(e.o === me ? '.pcard.me .emote-pop' : '.pcard.opp .emote-pop');
+        // (portrait phones hide your own card; your emotes pop from the dock instead)
+        const card = e.o === me
+          ? [...this.root.querySelectorAll('.pcard.me .emote-pop, .mystat .emote-pop')].find(x => x.parentElement.offsetParent !== null)
+          : this.root.querySelector('.pcard.opp .emote-pop');
         const em = EMOTES.find(x => x.id === e.id);
         if (card && em) { card.textContent = `${em.icon} ${em.text}`; card.classList.remove('show'); void card.offsetWidth; card.classList.add('show'); }
         break;
@@ -193,7 +289,7 @@ export class Hud {
     const t = el('div', 'toast ' + kind, html);
     if (owner >= 0) t.style.setProperty('--tc', teamColor(owner).main);
     this.els.toasts.prepend(t);
-    while (this.els.toasts.children.length > 4) this.els.toasts.lastChild.remove();
+    while (this.els.toasts.children.length > (this.phone ? 2 : 4)) this.els.toasts.lastChild.remove();
     setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 2600);
   }
 
@@ -207,11 +303,23 @@ export class Hud {
   }
   closeBMenu() { this.bmenuFor = null; this.els.bmenu.classList.add('hidden'); }
   positionBMenu(b) {
-    const s = this.m.renderer.toScreen(b.x, b.y);
+    const R = this.m.renderer;
+    const s = R.toScreen(b.x, b.y);
     const menu = this.els.bmenu;
     const w = menu.offsetWidth || 230, h = menu.offsetHeight || 120;
-    let x = s.x - w / 2, y = s.y + b.radius * this.m.renderer.view.scale * 0.9 + 22;
-    if (y + h > window.innerHeight - 100) y = s.y - b.radius * this.m.renderer.view.scale * 2.1 - h;
+    const rp = b.radius * R.view.scale;
+    if (this.phone) {
+      // float just above the building; flip below its count badge when there is no room
+      const pad = R.pad;
+      let y = s.y - rp * 1.7 - h - 4;
+      if (y < pad.top) y = s.y + rp * 0.62 + 24 * R.uiScale * R.view.scale + 10;
+      y = Math.min(y, window.innerHeight - pad.bottom - h - 2);
+      menu.style.left = Math.max(pad.left + 2, Math.min(window.innerWidth - pad.right - w - 2, s.x - w / 2)) + 'px';
+      menu.style.top = Math.max(pad.top, y) + 'px';
+      return;
+    }
+    let x = s.x - w / 2, y = s.y + rp * 0.9 + 22;
+    if (y + h > window.innerHeight - 100) y = s.y - rp * 2.1 - h;
     menu.style.left = Math.max(6, Math.min(window.innerWidth - w - 6, x)) + 'px';
     menu.style.top = Math.max(60, y) + 'px';
   }
@@ -232,6 +340,21 @@ export class Hud {
     else if (def.atkBonus) info = `⚔ +${Math.round(def.atkBonus[b.level - 1] * 100)}% attack for all cats`;
     else if (def.catnipBonus) info = `🌿 +${Math.round(def.catnipBonus[b.level - 1] * 100)}% catnip regen`;
     const m = this.els.bmenu;
+    if (this.phone) {
+      m.innerHTML = `
+        <div class="bm-h">${def.icon} ${def.name} <span class="lv">Lv ${b.level}</span></div>
+        <div class="bm-row">
+          ${cost != null ? `<button class="bm-up ${n >= cost ? '' : 'off'}" aria-label="Upgrade">⬆<span>${cost}</span></button>` : ''}
+          ${convs.map(c => `<button data-t="${c.t}" class="bm-cv ${n >= c.c ? '' : 'off'}" aria-label="Convert to ${BUILDINGS[c.t].name}">${BUILDINGS[c.t].icon}<span>${c.c}</span></button>`).join('')}
+          <button class="bm-x" aria-label="Close">✕</button>
+        </div>`;
+      m.querySelector('.bm-x').onclick = () => this.m.closeMenu();
+      const upb = m.querySelector('.bm-up');
+      if (upb) upb.onclick = () => { this.m.upgrade(b.id); };
+      m.querySelectorAll('.bm-cv').forEach(x => x.onclick = () => this.m.convert(b.id, x.dataset.t));
+      requestAnimationFrame(() => this.bmenuFor === b.id && this.positionBMenu(b));
+      return;
+    }
     m.innerHTML = `
       <div class="bm-h">${def.icon} ${def.name} <span class="lv">Lv ${b.level}${def.maxLevel > 1 ? '/' + def.maxLevel : ''}</span><button class="bm-x">✕</button></div>
       <div class="bm-i">${info}</div>
@@ -258,10 +381,14 @@ export class Hud {
       ${canPause ? '' : '<p class="muted">Online matches keep running!</p>'}
       <button class="btn primary p-resume">Resume</button>
       <div class="row"><button class="btn p-music">${st.music > 0 ? '🎵 Music: on' : '🎵 Music: off'}</button><button class="btn p-sound">${audio.muted ? '🔇 Sound: off' : '🔊 Sound: on'}</button></div>
-      <div class="help-mini">
+      <div class="help-mini">${this.phone ? `
+        <div><b>Drag</b> from your building to a target, or <b>tap</b> yours then <b>tap</b> the target</div>
+        <div><b>Swipe</b> across several of yours to send from all · <b>🐾 ALL</b> picks every building</div>
+        <div>Tapping yours also shows <b>upgrade</b> and <b>convert</b> · <b>double-tap</b> upgrades</div>
+        <div><b>Hold</b> a spell button to read what it does</div>` : `
         <div><b>Drag</b> from your building to send cats · <b>swipe</b> across several to send from all</div>
         <div><b>Tap</b> a building for upgrade/convert · <b>double-tap</b> to upgrade</div>
-        <div><b>1-3</b> spells · <b>Q W E R</b> send 25-100% · <b>T</b> emotes · <b>Esc</b> cancel</div>
+        <div><b>1-3</b> spells · <b>Q W E R</b> send 25-100% · <b>T</b> emotes · <b>Esc</b> cancel</div>`}
       </div>
       <button class="btn danger p-surrender">🏳️ Surrender</button>
     </div>`;

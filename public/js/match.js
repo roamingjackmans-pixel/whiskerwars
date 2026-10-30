@@ -5,6 +5,7 @@ import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, WOR
 import { Renderer, spellTargetOk } from './render.js';
 import { Hud } from './hud.js';
 import { audio } from './audio.js';
+import { isPhone, isPortrait, vibrate } from './device.js';
 
 const BBIT = n => 1 << BFX.indexOf(n);
 const LEFT_BIT = 1 << SFX.indexOf('left');
@@ -74,10 +75,10 @@ export class Match {
     this.attract = opts.mode === 'attract';
     this.renderer = new Renderer(canvas);
     this.renderer.fxLevel = opts.fxLevel || 'high';
-    if (this.attract) this.renderer.setPadding({ top: 0, bottom: 0, left: 0, right: 0 });
-    else this.renderer.setPadding(window.innerWidth < 700 ? { top: 46, bottom: 80, left: 2, right: 2 } : { top: 52, bottom: 76, left: 6, right: 6 });
+    this.phone = !this.attract && isPhone();
+    this.renderer.phone = this.phone;
     this.interp = new Interp(opts.role === 'guest' ? 0.16 : 0.05);
-    this.ui = { sources: [], point: null, hover: null, target: null, selected: null, targeting: null, targetingSlot: -1, prediction: null };
+    this.ui = { sources: [], point: null, hover: null, target: null, selected: null, targeting: null, targetingSlot: -1, prediction: null, allMode: false };
     this.pct = 0.5;
     this.over = false;
     this.ended = false;
@@ -94,20 +95,56 @@ export class Match {
       this.info = opts.info;
       if (opts.firstSnap) this.interp.push(opts.firstSnap);
     }
-    // Player 2 sees the (point-symmetric) map rotated, so everyone's base starts on the left.
+    // Player 2 sees the (point-symmetric) map turned around, so everyone's base starts on the left
+    // (or at the bottom when a portrait screen shows the field standing up).
     this.flip = this.me === 1;
-    const disp = this.flip ? { ...this.info, buildings: this.info.buildings.map(b => ({ ...b, x: WORLD_W - b.x, y: WORLD_H - b.y })) } : this.info;
-    this.renderer.setMatch(disp, this.me);
+    this.rotate = isPortrait();
     if (!this.attract) {
       this.hud = new Hud(hudRoot, this);
       this.hud.setup(this.info, this.me);
-      this.bindInput();
     }
+    this.applyPadding();
+    this.renderer.setMatch(this.info, this.me, this.makeView());
+    if (!this.attract) this.bindInput();
     this.onResize = () => {
-      if (!this.attract) this.renderer.setPadding(window.innerWidth < 700 ? { top: 46, bottom: 80, left: 2, right: 2 } : { top: 52, bottom: 76, left: 6, right: 6 });
-      else this.renderer.resize();
+      const rot = isPortrait();
+      if (rot !== this.rotate) {
+        // the phone was turned: rebuild the view and drop half-finished gestures
+        this.rotate = rot;
+        this.cancelAll && this.cancelAll();
+        this.applyPadding();
+        this.renderer.setView(this.makeView());
+      } else this.applyPadding();
     };
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', this.onResize);
+  }
+
+  // ---------- view ----------
+  /** world <-> view mapping for this player and screen shape */
+  makeView() {
+    const W = WORLD_W, H = WORLD_H, flip = this.flip, rotate = this.rotate;
+    const fwd = (x, y) => {
+      if (flip) { x = W - x; y = H - y; }
+      return rotate ? { x: y, y: W - x } : { x, y };
+    };
+    const inv = (x, y) => {
+      let wx = x, wy = y;
+      if (rotate) { wx = W - y; wy = x; }
+      if (flip) { wx = W - wx; wy = H - wy; }
+      return { x: wx, y: wy };
+    };
+    this.fwd = fwd; this.inv = inv;
+    return { w: rotate ? H : W, h: rotate ? W : H, fwd, fit: this.phone ? { side: 78, top: 112, bottom: 84 } : null };
+  }
+  applyPadding() {
+    if (this.attract) { this.renderer.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); return; }
+    if (this.phone && this.hud) {
+      this.hud.layoutPhone(this.rotate);
+      this.renderer.setPadding(this.hud.phonePadding());
+      return;
+    }
+    this.renderer.setPadding(window.innerWidth < 700 ? { top: 46, bottom: 80, left: 2, right: 2 } : { top: 52, bottom: 76, left: 6, right: 6 });
   }
 
   // ---------- lifecycle ----------
@@ -127,6 +164,7 @@ export class Match {
       if (!this.running) return;
       if (this.role !== 'guest') this.startSim();
       if (!this.attract) audio.music('battle');
+      if (this.phone && this.hud) this.hud.coach();
     };
     if (countdown > 0 && !this.attract) {
       this.hud.countdown(countdown, go);
@@ -177,6 +215,7 @@ export class Match {
     cancelAnimationFrame(this.raf);
     if (this.metro) { this.metro.stop(); this.metro = null; }
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('orientationchange', this.onResize);
     this.unbindInput && this.unbindInput();
     if (this.hud) this.hud.destroy();
   }
@@ -225,6 +264,8 @@ export class Match {
 
   buildView(a, b, u) {
     const pos = this.renderer.bpos;
+    // phones draw buildings a little larger than their footprint so they are easy to see and tap
+    const art = this.phone ? Math.max(1, Math.min(1.45, 0.58 / this.renderer.view.scale)) : 1;
     const buildings = [], byId = new Map();
     for (const arr of b.b) {
       const [id, owner, ti, level, count, fx, cap, hackBy] = arr;
@@ -232,15 +273,22 @@ export class Match {
       const prev = a._b.get(id);
       const c = prev && prev[1] === owner ? prev[4] + (count - prev[4]) * u : count;
       const type = BTYPES[ti];
-      const o = { id, x: p.x, y: p.y, owner, type, level, count: c, fx, cap, hackBy, radius: radiusOf(type, level) };
+      const o = { id, x: p.x, y: p.y, owner, type, level, count: c, fx, cap, hackBy, radius: radiusOf(type, level) * art };
       buildings.push(o); byId.set(id, o);
     }
     const squads = [], squadById = new Map();
     for (const arr of b.s) {
       const [id, owner, count, x, y, fx0, to] = arr;
       const prev = a._s.get(id);
-      let sx = prev ? prev[3] + (x - prev[3]) * u : x, sy = prev ? prev[4] + (y - prev[4]) * u : y, fx = fx0;
-      if (this.flip) { sx = WORLD_W - sx; sy = WORLD_H - sy; fx ^= LEFT_BIT; }
+      const wx = prev ? prev[3] + (x - prev[3]) * u : x, wy = prev ? prev[4] + (y - prev[4]) * u : y;
+      const v = this.fwd(wx, wy);
+      const sx = v.x, sy = v.y;
+      let fx = fx0;
+      if (this.rotate) {
+        // face the way the squad walks on screen
+        const tp = pos.get(to);
+        if (tp && Math.abs(tp.x - sx) > 2) fx = tp.x < sx ? (fx | LEFT_BIT) : (fx & ~LEFT_BIT);
+      } else if (this.flip) fx ^= LEFT_BIT;
       const o = { id, owner, count, x: sx, y: sy, fx, to };
       squads.push(o); squadById.set(id, o);
     }
@@ -249,7 +297,7 @@ export class Match {
   }
 
   handleEvent(e, V) {
-    if (this.flip && (e.x != null || e.y != null)) e = { ...e, x: e.x != null ? WORLD_W - e.x : e.x, y: e.y != null ? WORLD_H - e.y : e.y };
+    if (e.x != null && e.y != null && (this.flip || this.rotate)) { const p = this.fwd(e.x, e.y); e = { ...e, x: p.x, y: p.y }; }
     this.renderer.event(e, V);
     if (this.hud) this.hud.onEvent(e, V);
     if (this.attract) return;
@@ -257,7 +305,11 @@ export class Match {
     switch (e.k) {
       case 'send': if (e.o === me) audio.play('send', { vol: 0.6 }); break;
       case 'arrive': audio.play(e.f ? 'pop' : 'hit', { vol: e.f ? 0.35 : 0.6 }); break;
-      case 'cap': audio.play(e.o === me ? 'capture' : e.prev === me ? 'lost' : 'pop', { vol: e.o === me || e.prev === me ? 0.9 : 0.5 }); if (e.o === me && Math.random() < 0.5) audio.play('meow', { vol: 0.5 }); break;
+      case 'cap':
+        audio.play(e.o === me ? 'capture' : e.prev === me ? 'lost' : 'pop', { vol: e.o === me || e.prev === me ? 0.9 : 0.5 });
+        if (e.o === me && Math.random() < 0.5) audio.play('meow', { vol: 0.5 });
+        if (this.phone && (e.o === me || e.prev === me)) vibrate(e.o === me ? 18 : [12, 60, 12]);
+        break;
       case 'fight': audio.play('fight', { vol: 0.55 }); break;
       case 'shot': audio.play('shot', { vol: 0.28 }); break;
       case 'up': audio.play('upgrade', { vol: e.o === me ? 0.8 : 0.4 }); break;
@@ -336,19 +388,41 @@ export class Match {
     }
     // drop sources we no longer own
     if (ui.sources.length) ui.sources = ui.sources.filter(id => { const b = V.byId.get(id); return b && b.owner === this.me; });
+    if (ui.allMode && !ui.sources.length) this.setAll(false);
     if (ui.selected != null) { const b = V.byId.get(ui.selected); if (!b || b.owner !== this.me) { ui.selected = null; this.hud.closeBMenu(); } else this.hud.positionBMenu(b); }
   }
 
   pick(wx, wy, slack = 14) {
     const V = this.view;
     if (!V) return null;
+    // fingers are big: on phones a touch within ~38px of a building counts, nearest one wins
+    const s = this.renderer.view.scale;
+    const touchR = this.phone ? 38 / s : 0;
+    const extra = this.phone ? Math.max(slack, 12 / s) : slack;
     let best = null, bd = Infinity;
     for (const b of V.buildings) {
       const dx = wx - b.x, dy = (wy - (b.y - b.radius * 0.45)) * 0.85;
       const d = Math.hypot(dx, dy);
-      if (d < b.radius + slack && d < bd) { bd = d; best = b; }
+      if (d < Math.max(b.radius + extra, touchR) && d < bd) { bd = d; best = b; }
     }
     return best;
+  }
+
+  /** "ALL" button: every building you own becomes a source; the next tap picks the target. */
+  toggleAll() {
+    if (this.over || !this.view) return;
+    if (this.ui.allMode) { this.setAll(false); return; }
+    this.closeMenu(); this.cancelTargeting();
+    const mine = this.view.buildings.filter(b => b.owner === this.me && b.count >= 1).map(b => b.id);
+    if (!mine.length) { audio.play('error'); return; }
+    this.ui.allMode = true; this.ui.sources = mine; this.ui.point = null; this.ui.target = null;
+    this.hud && this.hud.setAll(true);
+    audio.play('click'); vibrate(8);
+  }
+  setAll(on) {
+    this.ui.allMode = !!on;
+    if (!on) { this.ui.sources = []; this.ui.target = null; }
+    this.hud && this.hud.setAll(!!on);
   }
 
   // ---------- commands from HUD ----------
@@ -377,8 +451,8 @@ export class Match {
     const sp = this.ui.targeting, slot = this.ui.targetingSlot;
     if (!sp) return;
     if (sp.target === 'area') {
-      const x = this.flip ? WORLD_W - wx : wx, y = this.flip ? WORLD_H - wy : wy;
-      this.sendCmd({ k: 'spell', slot, x: Math.round(x), y: Math.round(y) }); this.cancelTargeting(); return;
+      const w = this.inv(wx, wy);
+      this.sendCmd({ k: 'spell', slot, x: Math.round(w.x), y: Math.round(w.y) }); this.cancelTargeting(); vibrate(15); return;
     }
     const b = this.pick(wx, wy, 24);
     if (b && spellTargetOk(sp, b, this.me)) { this.sendCmd({ k: 'spell', slot, b: b.id }); this.cancelTargeting(); }
@@ -404,15 +478,25 @@ export class Match {
       this.ui.point = p;
       if (this.ui.targeting) { this.castAt(p.x, p.y); return; }
       const b = this.pick(p.x, p.y);
+      if (this.ui.allMode) {
+        const from = b ? this.ui.sources.filter(id => id !== b.id) : [];
+        if (b && from.length) {
+          this.sendCmd({ k: 'send', from, to: b.id, pct: this.pct });
+          audio.play('mew', { vol: 0.55, pitch: 1.1 }); vibrate(14);
+        }
+        this.setAll(false);
+        return;
+      }
       if (this.ui.selected != null && b && b.id !== this.ui.selected) {
         this.sendCmd({ k: 'send', from: [this.ui.selected], to: b.id, pct: this.pct });
-        audio.play('mew', { vol: 0.5 });
+        audio.play('mew', { vol: 0.5 }); vibrate(10);
         this.closeMenu();
         return;
       }
       if (b && b.owner === this.me) {
         drag = { sources: [b.id], sx: ev.clientX, sy: ev.clientY, t0: performance.now(), moved: false, pid: ev.pointerId };
         this.ui.sources = [b.id];
+        if (this.phone) vibrate(6);
         try { c.setPointerCapture(ev.pointerId); } catch { }
       } else {
         this.closeMenu();
@@ -424,12 +508,13 @@ export class Match {
       this.ui.point = p;
       const b = this.pick(p.x, p.y);
       this.ui.hover = b ? b.id : null;
-      if (!drag) { this.ui.target = null; return; }
+      if (!drag) { this.ui.target = this.ui.allMode && b ? b.id : null; return; }
       if (!drag.moved && Math.hypot(ev.clientX - drag.sx, ev.clientY - drag.sy) > 9) { drag.moved = true; this.closeMenu(); }
       if (!drag.moved) return;
       if (b && b.owner === this.me && !drag.sources.includes(b.id)) {
         drag.sources.push(b.id);
         audio.play('hover', { pitch: 1 + drag.sources.length * 0.08 });
+        if (this.phone) vibrate(5);
       }
       this.ui.sources = drag.sources;
       this.ui.target = b && !(drag.sources.length === 1 && drag.sources[0] === b.id) ? b.id : null;
@@ -453,7 +538,7 @@ export class Match {
         const from = d.sources.filter(id => id !== b.id);
         if (from.length) {
           this.sendCmd({ k: 'send', from, to: b.id, pct: this.pct });
-          audio.play('mew', { vol: 0.55, pitch: 1 + Math.random() * 0.2 });
+          audio.play('mew', { vol: 0.55, pitch: 1 + Math.random() * 0.2 }); vibrate(10);
         }
       }
       this.ui.sources = []; this.ui.target = null;
@@ -490,5 +575,5 @@ export class Match {
       c.style.cursor = '';
     };
   }
-  cancelAll() { this.cancelTargeting(); this.closeMenu(); this.ui.sources = []; this.ui.target = null; this.hud && this.hud.closeEmotes(); }
+  cancelAll() { this.cancelTargeting(); this.closeMenu(); this.setAll(false); this.ui.sources = []; this.ui.target = null; this.hud && this.hud.closeEmotes(); }
 }

@@ -32,6 +32,11 @@ export class Renderer {
     this.fxLevel = 'high';
     this.me = 0;
     this.dim = 0;
+    // view size: WORLD_W x WORLD_H normally, swapped when a portrait phone shows the field standing up
+    this.VW = WORLD_W; this.VH = WORLD_H;
+    this.fit = null;          // optional rect (view coords) to zoom onto instead of the whole field
+    this.phone = false;       // bigger labels, units and touch-friendly overlays
+    this.uiScale = 1; this.textScale = 1; this.unitScale = 1;
     this.resize();
   }
 
@@ -42,25 +47,54 @@ export class Renderer {
     const w = this.canvas.clientWidth || window.innerWidth, h = this.canvas.clientHeight || window.innerHeight;
     this.dpr = dpr; this.w = w; this.h = h;
     this.canvas.width = Math.round(w * dpr); this.canvas.height = Math.round(h * dpr);
-    const aw = w - this.pad.left - this.pad.right, ah = h - this.pad.top - this.pad.bottom;
-    const scale = Math.max(0.2, Math.min(aw / WORLD_W, ah / WORLD_H));
-    this.view = { scale, ox: this.pad.left + (aw - WORLD_W * scale) / 2, oy: this.pad.top + (ah - WORLD_H * scale) / 2 };
+    const aw = Math.max(50, w - this.pad.left - this.pad.right), ah = Math.max(50, h - this.pad.top - this.pad.bottom);
+    const f = this.fit || { x0: 0, y0: 0, x1: this.VW, y1: this.VH };
+    const fw = f.x1 - f.x0, fh = f.y1 - f.y0;
+    const scale = Math.max(0.12, Math.min(aw / fw, ah / fh));
+    this.view = { scale, ox: this.pad.left + (aw - fw * scale) / 2 - f.x0 * scale, oy: this.pad.top + (ah - fh * scale) / 2 - f.y0 * scale };
+    // phones: keep numbers readable (~13px) however small the field gets
+    if (this.phone) {
+      this.uiScale = Math.max(1, Math.min(2.6, 13 / (15 * scale)));
+      this.textScale = 1 + (this.uiScale - 1) * 0.7;
+      this.unitScale = Math.max(1, Math.min(1.6, 0.62 / scale));
+    } else { this.uiScale = 1; this.textScale = 1; this.unitScale = 1; }
     if (this.bgInfo && Math.abs(scale * dpr - this.bgScale) / this.bgScale > 0.15) this.buildBackground();
   }
-  setMatch(info, me = 0) {
+  /**
+   * view: { w, h, fwd(x, y) -> {x, y}, fit } maps world positions to what this player sees
+   * (flipped for player 2, stood up in portrait). Defaults to the plain world.
+   */
+  setMatch(info, me = 0, view = null) {
     this.info = info;
     this.me = me;
     this.theme = info.map.theme || 'meadow';
     this.seed = info.map.seed || 1;
     this.players = info.players;
-    this.bpos = new Map(info.buildings.map(b => [b.id, b]));
-    this.bgInfo = info.buildings.map(b => ({ x: b.x, y: b.y, radius: 44 }));
+    this.setView(view);
+  }
+  setView(view) {
+    const fwd = view ? view.fwd : (x, y) => ({ x, y });
+    this.VW = view ? view.w : WORLD_W; this.VH = view ? view.h : WORLD_H;
+    this.bpos = new Map(this.info.buildings.map(b => { const p = fwd(b.x, b.y); return [b.id, { ...b, x: p.x, y: p.y }]; }));
+    const pts = [...this.bpos.values()];
+    this.bgInfo = pts.map(b => ({ x: b.x, y: b.y, radius: 44 }));
+    if (view && view.fit && pts.length) {
+      // zoom onto the buildings (room above for art + prediction pill, below for count badges)
+      const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+      const m = view.fit;
+      this.fit = {
+        x0: Math.max(0, Math.min(...xs) - m.side), x1: Math.min(this.VW, Math.max(...xs) + m.side),
+        y0: Math.max(0, Math.min(...ys) - m.top), y1: Math.min(this.VH, Math.max(...ys) + m.bottom),
+      };
+    } else this.fit = null;
     this.parts.length = 0; this.timed.length = 0; this.decals.length = 0; this.projs.length = 0; this.hits.clear();
+    this.bgScale = 0;
+    this.resize();
     this.buildBackground();
   }
   buildBackground() {
     const s = Math.min(this.view.scale * this.dpr, 2.2);
-    try { this.bg = art.renderBackground(this.theme, this.seed, this.bgInfo || [], s); }
+    try { this.bg = art.renderBackground(this.theme, this.seed, this.bgInfo || [], s, this.VW, this.VH); }
     catch (e) { console.error('bg', e); this.bg = null; }
     this.bgScale = s;
   }
@@ -77,16 +111,17 @@ export class Renderer {
     ctx.fillStyle = shade(th.ground2, -0.35);
     ctx.fillRect(0, 0, this.w, this.h);
     // extend the battlefield art softly past the playable area so there are no empty bars
-    if (this.bg && (ox > 2 || oy > 2)) {
-      const k = Math.max(this.w / (WORLD_W * scale), this.h / (WORLD_H * scale)) * 1.04;
-      const bw = WORLD_W * scale * k, bh = WORLD_H * scale * k;
-      ctx.drawImage(this.bg, ox + WORLD_W * scale / 2 - bw / 2, oy + WORLD_H * scale / 2 - bh / 2, bw, bh);
+    const VW = this.VW, VH = this.VH;
+    if (this.bg && (ox > 2 || oy > 2 || ox + VW * scale < this.w - 2 || oy + VH * scale < this.h - 2)) {
+      const k = Math.max(this.w / (VW * scale), this.h / (VH * scale)) * 1.04;
+      const bw = VW * scale * k, bh = VH * scale * k;
+      ctx.drawImage(this.bg, this.w / 2 - bw / 2, this.h / 2 - bh / 2, bw, bh);
       ctx.fillStyle = 'rgba(25,15,40,0.42)';
       ctx.fillRect(0, 0, this.w, this.h);
       ctx.save();
       ctx.shadowColor = 'rgba(0,0,0,0.45)'; ctx.shadowBlur = 28;
       ctx.fillStyle = th.ground;
-      ctx.fillRect(ox, oy, WORLD_W * scale, WORLD_H * scale);
+      ctx.fillRect(ox, oy, VW * scale, VH * scale);
       ctx.restore();
     }
 
@@ -95,8 +130,8 @@ export class Renderer {
     this.shake *= Math.pow(0.02, dt);
     const wt = () => ctx.setTransform(d * scale, 0, 0, d * scale, d * (ox + sx), d * (oy + sy));
     wt();
-    if (this.bg) ctx.drawImage(this.bg, 0, 0, WORLD_W, WORLD_H);
-    else { ctx.fillStyle = th.ground; ctx.fillRect(0, 0, WORLD_W, WORLD_H); }
+    if (this.bg) ctx.drawImage(this.bg, 0, 0, VW, VH);
+    else { ctx.fillStyle = th.ground; ctx.fillRect(0, 0, VW, VH); }
     if (!V) return;
 
     this.drawDecals(ctx, dt);
@@ -116,7 +151,7 @@ export class Renderer {
     this.drawProjectiles(ctx, V, dt);
     this.updateParticles(ctx, dt);
     this.drawTimed(ctx, V, dt, t);
-    if (this.fxLevel !== 'low') { try { art.drawAmbient(ctx, this.theme, t); } catch { /* optional */ } }
+    if (this.fxLevel !== 'low') { try { art.setArtSize(VW, VH); art.drawAmbient(ctx, this.theme, t); } catch { /* optional */ } }
     for (const b of V.buildings) this.drawBadge(ctx, b);
     for (const s of V.squads) if (!has(s.fx, 's_wait')) this.drawSquadBadge(ctx, s);
     if (ui) this.drawOverlayUI(ctx, V, ui, t);
@@ -162,12 +197,14 @@ export class Renderer {
   drawBadge(ctx, b) {
     const c = teamColor(b.owner);
     const n = Math.floor(b.count);
-    const y = b.y + b.radius * 0.62 + 10;
+    const k = this.uiScale;
+    const y = b.y + b.radius * 0.62 + 10 * k;
     const txt = String(n);
     ctx.font = FONT(700, 15);
     const w = Math.max(30, ctx.measureText(txt).width + 16);
     const full = b.owner >= 0 && b.count >= b.cap - 0.01;
     ctx.save();
+    if (k !== 1) { ctx.translate(b.x, y); ctx.scale(k, k); ctx.translate(-b.x, -y); }
     ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;
     rr(ctx, b.x - w / 2, y - 11, w, 22, 11);
     ctx.fillStyle = b.owner >= 0 ? c.dark : '#7d756b';
@@ -189,7 +226,7 @@ export class Renderer {
   visibleCount(n) { return n <= 8 ? n : Math.min(this.fxLevel === 'low' ? 10 : 18, 8 + Math.floor((n - 8) / 3)); }
   drawSquadShadow(ctx, s) {
     const n = Math.max(1, Math.round(s.count));
-    const r = 6 + Math.sqrt(this.visibleCount(n)) * 5.5;
+    const r = (6 + Math.sqrt(this.visibleCount(n)) * 5.5) * this.unitScale;
     const st = has(s.fx, 's_stealth');
     ctx.fillStyle = `rgba(0,0,0,${st ? 0.05 : 0.16})`;
     ctx.beginPath(); ctx.ellipse(s.x, s.y + 2, r, r * 0.45, 0, 0, TAU); ctx.fill();
@@ -206,6 +243,8 @@ export class Renderer {
     const slow = has(s.fx, 's_slow');
     const owner = V.players[s.owner];
     ctx.save();
+    const us = this.unitScale;
+    if (us !== 1) { ctx.translate(s.x, s.y); ctx.scale(us, us); ctx.translate(-s.x, -s.y); }
     if (stealth) ctx.globalAlpha = s.owner === this.me ? 0.45 : 0.1;
     const order = FORM_SORTED.slice(0, vis).sort((a, b) => a.y - b.y);
     for (const o of order) {
@@ -248,8 +287,11 @@ export class Renderer {
     if (has(s.fx, 's_stealth') && s.owner !== this.me) return;
     const c = teamColor(s.owner);
     const vis = this.visibleCount(n);
-    const y = s.y - 26 - Math.sqrt(vis) * 4.2;
+    const k = this.uiScale;
+    const y = s.y - (26 + Math.sqrt(vis) * 4.2) * this.unitScale - (k - 1) * 4;
     const txt = String(n);
+    ctx.save();
+    if (k !== 1) { ctx.translate(s.x, y); ctx.scale(k * 0.9, k * 0.9); ctx.translate(-s.x, -y); }
     ctx.font = FONT(700, 11);
     const w = Math.max(20, ctx.measureText(txt).width + 10);
     rr(ctx, s.x - w / 2, y - 8, w, 16, 8);
@@ -258,6 +300,7 @@ export class Renderer {
     ctx.fillStyle = c.main; ctx.fill();
     ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(txt, s.x, y + 0.5);
+    ctx.restore();
   }
 
   // ---------- ground & overlay UI ----------
@@ -309,17 +352,26 @@ export class Renderer {
       }
       if (ui.prediction && tb) {
         const p = ui.prediction;
+        const k = this.uiScale;
         ctx.font = FONT(700, 16);
         const w = ctx.measureText(p.text).width + 20;
-        const y = tb.y - tb.radius * 1.9 - 18;
+        // on touch screens keep the pill clear of the fingertip
+        let y = tb.y - tb.radius * 1.9 - 18 * k;
+        if (this.phone) y = Math.min(y, tb.y - 78 / this.view.scale);
+        const top = (this.fit ? this.fit.y0 : 0) + 16 * k;
+        let x = tb.x;
+        if (y < top) y = tb.y + tb.radius + 40 * k;   // no room above: show it below instead
+        ctx.save();
+        if (k !== 1) { ctx.translate(x, y); ctx.scale(k, k); ctx.translate(-x, -y); }
         ctx.save();
         ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 6;
-        rr(ctx, tb.x - w / 2, y - 14, w, 28, 14);
+        rr(ctx, x - w / 2, y - 14, w, 28, 14);
         ctx.fillStyle = p.good ? 'rgba(40,170,95,0.95)' : p.neutral ? 'rgba(70,120,200,0.95)' : 'rgba(210,60,70,0.95)';
         ctx.fill();
         ctx.restore();
         ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(p.text, tb.x, y + 1);
+        ctx.fillText(p.text, x, y + 1);
+        ctx.restore();
       }
     }
     // spell targeting
@@ -591,7 +643,7 @@ export class Renderer {
         case 'heart': heart(ctx, p.x, p.y, p.size * 1.2, p.color); break;
         case 'confetti': ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.fillStyle = p.color; ctx.fillRect(-p.size / 2, -p.size / 4, p.size, p.size / 2); ctx.restore(); break;
         case 'text': {
-          const s = p.size * (p.t < 0.12 ? 0.6 + p.t / 0.12 * 0.5 : 1.1 - Math.min(0.1, (p.t - 0.12)));
+          const s = this.textScale * p.size * (p.t < 0.12 ? 0.6 + p.t / 0.12 * 0.5 : 1.1 - Math.min(0.1, (p.t - 0.12)));
           ctx.font = FONT(700, s); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.lineWidth = 4; ctx.strokeStyle = p.outline; ctx.strokeText(p.text, p.x, p.y);
           ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y);
@@ -599,7 +651,7 @@ export class Renderer {
           break;
         }
         case 'emoji': {
-          const s = p.pop && p.t < 0.2 ? p.size * (0.4 + p.t / 0.2 * 0.8) : p.size;
+          const s = this.textScale * (p.pop && p.t < 0.2 ? p.size * (0.4 + p.t / 0.2 * 0.8) : p.size);
           ctx.font = FONT(400, s); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.fillText(p.text, p.x, p.y);
           if (p.pop) p.vy *= 0.94;
@@ -760,8 +812,10 @@ export class Renderer {
           const s = 1 + (u < 0.15 ? (1 - u / 0.15) * 0.6 : 0);
           ctx.save();
           ctx.globalAlpha = a;
-          ctx.translate(WORLD_W / 2, WORLD_H * 0.42);
-          ctx.scale(s, s);
+          const f = this.fit || { x0: 0, y0: 0, x1: this.VW, y1: this.VH };
+          const fitS = Math.min(1, (f.x1 - f.x0) * 0.9 / 820);   // keep the big text inside a narrow field
+          ctx.translate((f.x0 + f.x1) / 2, f.y0 + (f.y1 - f.y0) * 0.42);
+          ctx.scale(s * fitS, s * fitS);
           ctx.font = FONT(700, 64); ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
           ctx.lineWidth = 10; ctx.strokeStyle = teamColor(e.owner).dark; ctx.strokeText(`${e.icon} ${e.text}`, 0, 0);
           ctx.fillStyle = '#fff'; ctx.fillText(`${e.icon} ${e.text}`, 0, 0);

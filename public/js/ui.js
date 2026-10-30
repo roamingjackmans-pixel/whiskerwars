@@ -9,6 +9,7 @@ import { Match } from './match.js';
 import { OnlineSession } from './online.js';
 import { detectServer, cleanCode } from './net.js';
 import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
+import { isPhone, applyDeviceClass, enterFullscreen, keepAwake } from './device.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -42,6 +43,15 @@ export function initUI() {
   const st = P.profile().settings;
   audio.setVolumes({ sfx: st.sfx, music: st.music });
   audio.setMuted(!!st.muted);
+  applyDeviceClass();
+  window.addEventListener('resize', applyDeviceClass);
+  // The phone's back button (or browser back) mid-battle opens the battle menu instead of leaving the game.
+  window.addEventListener('popstate', () => {
+    if (match && !match.over && match.hud) {
+      try { history.pushState({ ww: 'battle' }, ''); } catch { /* ignore */ }
+      match.hud.openPause();
+    }
+  });
 }
 
 // ---------------------------------------------------------------- attract-mode background battle
@@ -509,6 +519,10 @@ function beginMatch(opts) {
   if (current && current.leave) { current.leave('match'); current.leave = null; }
   current = { name: 'match' };
   const st = P.profile().settings;
+  // phones: hide the browser bars (Android) and keep the screen awake for the battle
+  enterFullscreen();
+  keepAwake.wanted = true; keepAwake(true);
+  if (!history.state || history.state.ww !== 'battle') { try { history.pushState({ ww: 'battle' }, ''); } catch { /* ignore */ } }
   const m = new Match(canvas, hudRoot, {
     ...opts, fxLevel: st.fx,
     onEnd: res => onMatchEnd(m, opts, res),
@@ -519,6 +533,7 @@ function beginMatch(opts) {
 }
 
 function onMatchEnd(m, opts, res) {
+  keepAwake.wanted = false; keepAwake(false);
   if (m._offs) m._offs.forEach(f => f());
   if (session) session.inMatch = false;
   m.stop();
@@ -827,6 +842,12 @@ SCREENS.settings = () => {
       <label>🎵 Music <input type="range" min="0" max="1" step="0.05" value="${s.music}" class="r-music"></label>
       <label>🔇 Mute everything <input type="checkbox" class="c-mute" ${s.muted ? 'checked' : ''}></label>
       <label>✨ Visual effects <select class="s-fx"><option value="high" ${s.fx === 'high' ? 'selected' : ''}>High</option><option value="medium" ${s.fx === 'medium' ? 'selected' : ''}>Medium</option><option value="low" ${s.fx === 'low' ? 'selected' : ''}>Low (older devices)</option></select></label>
+      <label>📱 Battle layout <select class="s-layout">
+        <option value="auto" ${(s.layout || 'auto') === 'auto' ? 'selected' : ''}>Automatic (${isPhone() && (s.layout || 'auto') === 'auto' ? 'phone' : 'detect'})</option>
+        <option value="phone" ${s.layout === 'phone' ? 'selected' : ''}>Phone</option>
+        <option value="desktop" ${s.layout === 'desktop' ? 'selected' : ''}>Computer / tablet</option></select></label>
+      <label>📳 Vibration on phones <input type="checkbox" class="c-vib" ${s.vibrate !== false ? 'checked' : ''}></label>
+      <label>⛶ Full screen battles on phones <input type="checkbox" class="c-fs" ${s.fullscreen !== false ? 'checked' : ''}></label>
       <div class="net-info muted small"></div>
       <hr>
       <button class="btn danger small reset">Reset all progress</button>
@@ -836,6 +857,9 @@ SCREENS.settings = () => {
   $('.r-music').oninput = ev => { P.setSetting('music', +ev.target.value); audio.setVolumes({ music: +ev.target.value }); };
   $('.c-mute').onchange = ev => { P.setSetting('muted', ev.target.checked); audio.setMuted(ev.target.checked); };
   $('.s-fx').onchange = ev => P.setSetting('fx', ev.target.value);
+  $('.s-layout').onchange = ev => { P.setSetting('layout', ev.target.value); applyDeviceClass(); };
+  $('.c-vib').onchange = ev => P.setSetting('vibrate', ev.target.checked);
+  $('.c-fs').onchange = ev => P.setSetting('fullscreen', ev.target.checked);
   detectServer().then(u => { $('.net-info').textContent = u ? `Online play: game server (${u})` : 'Online play: direct peer-to-peer (PeerJS)'; });
   $('.reset').onclick = ev => {
     if (!ev.target.dataset.sure) { ev.target.dataset.sure = 1; ev.target.textContent = 'Tap again to erase everything'; return; }

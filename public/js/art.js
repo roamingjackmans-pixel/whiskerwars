@@ -5,6 +5,10 @@ import {
   teamColor, WORLD_W, WORLD_H, mulberry32,
 } from '../shared/data.js';
 
+// Battlefield size used by the background and ambient art. Phones in portrait use a tall field.
+let AW = WORLD_W, AH = WORLD_H;
+export function setArtSize(w, h) { AW = w; AH = h; }
+
 const TAU = Math.PI * 2;
 
 // ---------------------------------------------------------------- utils
@@ -1515,14 +1519,14 @@ function softBlob(ctx, x, y, r, col, a) {
   ctx.fillStyle = g; ctx.fillRect(x - r, y - r, r * 2, r * 2);
 }
 function groundGrad(ctx, a, b) {
-  const g = ctx.createLinearGradient(0, 0, WORLD_W * 0.3, WORLD_H);
+  const g = ctx.createLinearGradient(0, 0, AW * 0.3, AH);
   g.addColorStop(0, a); g.addColorStop(1, b);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, AW, AH);
 }
 function tufts(ctx, rnd, n, cols, len = 5) {
   ctx.lineCap = 'round'; ctx.lineWidth = 1.3;
   for (let i = 0; i < n; i++) {
-    const x = rnd() * WORLD_W, y = rnd() * WORLD_H, l = len * (0.6 + rnd() * 0.7);
+    const x = rnd() * AW, y = rnd() * AH, l = len * (0.6 + rnd() * 0.7);
     ctx.strokeStyle = cols[i % cols.length];
     ctx.beginPath();
     ctx.moveTo(x - 2, y - l * 0.8); ctx.lineTo(x, y); ctx.lineTo(x + 0.4, y - l);
@@ -1532,7 +1536,7 @@ function tufts(ctx, rnd, n, cols, len = 5) {
 }
 function tinyFlowers(ctx, rnd, n, cols) {
   for (let i = 0; i < n; i++) {
-    const x = rnd() * WORLD_W, y = rnd() * WORLD_H, c = cols[Math.floor(rnd() * cols.length)];
+    const x = rnd() * AW, y = rnd() * AH, c = cols[Math.floor(rnd() * cols.length)];
     ctx.fillStyle = c;
     for (let k = 0; k < 5; k++) { const a = k / 5 * TAU; circ(ctx, x + Math.cos(a) * 1.5, y + Math.sin(a) * 1.5, 1.2); ctx.fill(); }
     circ(ctx, x, y, 0.9); ctx.fillStyle = '#ffd84a'; ctx.fill();
@@ -1542,7 +1546,7 @@ function tinyFlowers(ctx, rnd, n, cols) {
 // ---- ground painters
 function gMeadow(ctx, rnd) {
   groundGrad(ctx, '#9fdc76', '#76bf55');
-  for (let i = 0; i < 46; i++) softBlob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 60 + rnd() * 140, i % 2 ? '#c6f09a' : '#4f9a3c', 0.22);
+  for (let i = 0; i < 46; i++) softBlob(ctx, rnd() * AW, rnd() * AH, 60 + rnd() * 140, i % 2 ? '#c6f09a' : '#4f9a3c', 0.22);
   tufts(ctx, rnd, 1500, ['#5fa844', '#8fd36a', '#4e9638', '#a7e47f'], 6);
   tinyFlowers(ctx, rnd, 170, ['#ffffff', '#ffe066', '#ff8fb8', '#c7a6ff']);
 }
@@ -1550,8 +1554,8 @@ function gRooftop(ctx, rnd) {
   groundGrad(ctx, '#dca07a', '#b07052');
   const cols = ['#c97c5a', '#b9694d', '#a86f6a', '#c98a5e', '#9a6a7a', '#b8785e'];
   const xs = [0];
-  while (xs[xs.length - 1] < WORLD_W - 200) xs.push(xs[xs.length - 1] + 200 + rnd() * 220);
-  xs.push(WORLD_W);
+  while (xs[xs.length - 1] < AW - 200) xs.push(xs[xs.length - 1] + 200 + rnd() * 220);
+  xs.push(AW);
   const tile = (x0, y0, x1, y1, c) => {
     ctx.fillStyle = c; ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
     ctx.save(); ctx.beginPath(); ctx.rect(x0, y0, x1 - x0, y1 - y0); ctx.clip();
@@ -1565,74 +1569,74 @@ function gRooftop(ctx, rnd) {
   for (let i = 0; i < xs.length - 1; i++) {
     const split = 220 + rnd() * 460;
     tile(xs[i], 0, xs[i + 1], split, cols[(i * 2) % cols.length]);
-    tile(xs[i], split, xs[i + 1], WORLD_H, cols[(i * 2 + 3) % cols.length]);
+    tile(xs[i], split, xs[i + 1], AH, cols[(i * 2 + 3) % cols.length]);
     gutters.push([xs[i], split, xs[i + 1], split]);
-    if (i > 0) gutters.push([xs[i], 0, xs[i], WORLD_H]);
+    if (i > 0) gutters.push([xs[i], 0, xs[i], AH]);
   }
   for (const [x0, y0, x1, y1] of gutters) {
     ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.strokeStyle = 'rgba(70,40,35,0.75)'; ctx.lineWidth = 6; ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x0 - (y0 === y1 ? 0 : 2), y0 - (y0 === y1 ? 2 : 0)); ctx.lineTo(x1 - (y0 === y1 ? 0 : 2), y1 - (y0 === y1 ? 2 : 0)); ctx.strokeStyle = 'rgba(255,220,180,0.35)'; ctx.lineWidth = 1.5; ctx.stroke();
   }
-  for (let i = 0; i < 20; i++) softBlob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 80 + rnd() * 120, i % 2 ? '#ffd2a0' : '#5a2c2c', 0.15);
-  const sun = ctx.createLinearGradient(0, 0, 0, WORLD_H);
+  for (let i = 0; i < 20; i++) softBlob(ctx, rnd() * AW, rnd() * AH, 80 + rnd() * 120, i % 2 ? '#ffd2a0' : '#5a2c2c', 0.15);
+  const sun = ctx.createLinearGradient(0, 0, 0, AH);
   sun.addColorStop(0, 'rgba(255,190,110,0.25)'); sun.addColorStop(1, 'rgba(120,60,120,0.18)');
-  ctx.fillStyle = sun; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  ctx.fillStyle = sun; ctx.fillRect(0, 0, AW, AH);
 }
 function gSnow(ctx, rnd) {
   groundGrad(ctx, '#f6faff', '#d7e6f6');
   for (let i = 0; i < 40; i++) {
-    const x = rnd() * WORLD_W, y = rnd() * WORLD_H, r = 60 + rnd() * 120;
+    const x = rnd() * AW, y = rnd() * AH, r = 60 + rnd() * 120;
     softBlob(ctx, x, y + r * 0.25, r, '#9fbfe0', 0.18);
     softBlob(ctx, x, y, r * 0.9, '#ffffff', 0.55);
   }
   ctx.strokeStyle = 'rgba(150,180,215,0.35)'; ctx.lineWidth = 2;
-  for (let i = 0; i < 40; i++) { const x = rnd() * WORLD_W, y = rnd() * WORLD_H, w = 40 + rnd() * 60; ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - 12, x + w, y); ctx.stroke(); }
-  for (let i = 0; i < 380; i++) { const x = rnd() * WORLD_W, y = rnd() * WORLD_H; circ(ctx, x, y, 0.6 + rnd() * 0.9); ctx.fillStyle = rnd() < 0.5 ? '#ffffff' : '#bfe0ff'; ctx.fill(); }
+  for (let i = 0; i < 40; i++) { const x = rnd() * AW, y = rnd() * AH, w = 40 + rnd() * 60; ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - 12, x + w, y); ctx.stroke(); }
+  for (let i = 0; i < 380; i++) { const x = rnd() * AW, y = rnd() * AH; circ(ctx, x, y, 0.6 + rnd() * 0.9); ctx.fillStyle = rnd() < 0.5 ? '#ffffff' : '#bfe0ff'; ctx.fill(); }
 }
 function gNight(ctx, rnd) {
   groundGrad(ctx, '#355772', '#1f3447');
-  for (let i = 0; i < 40; i++) softBlob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 70 + rnd() * 140, i % 2 ? '#4f7a8c' : '#152536', 0.3);
-  softBlob(ctx, WORLD_W * 0.78, WORLD_H * 0.18, 520, '#bcd6ff', 0.18);
+  for (let i = 0; i < 40; i++) softBlob(ctx, rnd() * AW, rnd() * AH, 70 + rnd() * 140, i % 2 ? '#4f7a8c' : '#152536', 0.3);
+  softBlob(ctx, AW * 0.78, AH * 0.18, 520, '#bcd6ff', 0.18);
   tufts(ctx, rnd, 1200, ['#2c4a5e', '#46708a', '#25404f'], 6);
-  for (let i = 0; i < 90; i++) { const x = rnd() * WORLD_W, y = rnd() * WORLD_H; circ(ctx, x, y, 1 + rnd()); ctx.fillStyle = rnd() < 0.5 ? 'rgba(185,166,255,0.6)' : 'rgba(150,255,220,0.5)'; ctx.fill(); }
+  for (let i = 0; i < 90; i++) { const x = rnd() * AW, y = rnd() * AH; circ(ctx, x, y, 1 + rnd()); ctx.fillStyle = rnd() < 0.5 ? 'rgba(185,166,255,0.6)' : 'rgba(150,255,220,0.5)'; ctx.fill(); }
 }
 function gBeach(ctx, rnd) {
   groundGrad(ctx, '#f7e2ae', '#e8c98b');
-  for (let i = 0; i < 40; i++) softBlob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 60 + rnd() * 140, i % 2 ? '#fff3cf' : '#d4ad6c', 0.28);
+  for (let i = 0; i < 40; i++) softBlob(ctx, rnd() * AW, rnd() * AH, 60 + rnd() * 140, i % 2 ? '#fff3cf' : '#d4ad6c', 0.28);
   ctx.strokeStyle = 'rgba(190,150,90,0.35)'; ctx.lineWidth = 1.2;
-  for (let i = 0; i < 160; i++) { const x = rnd() * WORLD_W, y = 90 + rnd() * (WORLD_H - 180), w = 10 + rnd() * 18; ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - 4, x + w, y); ctx.stroke(); }
-  for (let i = 0; i < 260; i++) { circ(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 0.8); ctx.fillStyle = 'rgba(160,120,70,0.4)'; ctx.fill(); }
+  for (let i = 0; i < 160; i++) { const x = rnd() * AW, y = 90 + rnd() * (AH - 180), w = 10 + rnd() * 18; ctx.beginPath(); ctx.moveTo(x - w, y); ctx.quadraticCurveTo(x, y - 4, x + w, y); ctx.stroke(); }
+  for (let i = 0; i < 260; i++) { circ(ctx, rnd() * AW, rnd() * AH, 0.8); ctx.fillStyle = 'rgba(160,120,70,0.4)'; ctx.fill(); }
   // water bands
   const band = (top) => {
-    const y0 = top ? 0 : WORLD_H - 62, y1 = top ? 62 : WORLD_H;
-    const g = ctx.createLinearGradient(0, top ? 0 : WORLD_H, 0, top ? 62 : WORLD_H - 62);
+    const y0 = top ? 0 : AH - 62, y1 = top ? 62 : AH;
+    const g = ctx.createLinearGradient(0, top ? 0 : AH, 0, top ? 62 : AH - 62);
     g.addColorStop(0, '#2a9fc4'); g.addColorStop(0.7, '#5fd0e6'); g.addColorStop(1, '#9de8f2');
     ctx.beginPath();
-    const edge = x => (top ? 52 : WORLD_H - 52) + Math.sin(x * 0.02) * 6 * (top ? 1 : -1) + Math.sin(x * 0.053) * 3;
-    ctx.moveTo(0, top ? 0 : WORLD_H);
-    for (let x = 0; x <= WORLD_W; x += 20) ctx.lineTo(x, edge(x));
-    ctx.lineTo(WORLD_W, top ? 0 : WORLD_H); ctx.closePath();
+    const edge = x => (top ? 52 : AH - 52) + Math.sin(x * 0.02) * 6 * (top ? 1 : -1) + Math.sin(x * 0.053) * 3;
+    ctx.moveTo(0, top ? 0 : AH);
+    for (let x = 0; x <= AW; x += 20) ctx.lineTo(x, edge(x));
+    ctx.lineTo(AW, top ? 0 : AH); ctx.closePath();
     ctx.fillStyle = 'rgba(200,170,120,0.5)'; ctx.save(); ctx.translate(0, top ? 6 : -6); ctx.fill(); ctx.restore();
     ctx.fillStyle = g; ctx.fill();
-    ctx.beginPath(); for (let x = 0; x <= WORLD_W; x += 20) ctx.lineTo(x, edge(x));
+    ctx.beginPath(); for (let x = 0; x <= AW; x += 20) ctx.lineTo(x, edge(x));
     ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = 3; ctx.stroke();
     ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.5;
-    for (let i = 0; i < 26; i++) { const x = rnd() * WORLD_W, y = y0 + rnd() * (y1 - y0 - 14) + (top ? 0 : 14); ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.quadraticCurveTo(x, y - 4, x + 9, y); ctx.stroke(); }
+    for (let i = 0; i < 26; i++) { const x = rnd() * AW, y = y0 + rnd() * (y1 - y0 - 14) + (top ? 0 : 14); ctx.beginPath(); ctx.moveTo(x - 9, y); ctx.quadraticCurveTo(x, y - 4, x + 9, y); ctx.stroke(); }
   };
   band(true); band(false);
 }
 function gCandy(ctx, rnd) {
   groundGrad(ctx, '#ffd3ea', '#ffb0d4');
-  for (let i = 0; i < 36; i++) softBlob(ctx, rnd() * WORLD_W, rnd() * WORLD_H, 70 + rnd() * 140, i % 2 ? '#ffffff' : '#ff8fc4', 0.3);
+  for (let i = 0; i < 36; i++) softBlob(ctx, rnd() * AW, rnd() * AH, 70 + rnd() * 140, i % 2 ? '#ffffff' : '#ff8fc4', 0.3);
   ctx.lineCap = 'round';
   for (let i = 0; i < 26; i++) {
-    const x = rnd() * WORLD_W, y = rnd() * WORLD_H, r = 20 + rnd() * 30;
+    const x = rnd() * AW, y = rnd() * AH, r = 20 + rnd() * 30;
     ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 6;
     ctx.beginPath(); for (let a = 0; a < TAU * 1.6; a += 0.2) { const rr2 = r * (1 - a / (TAU * 2)); ctx.lineTo(x + Math.cos(a) * rr2, y + Math.sin(a) * rr2 * 0.6); } ctx.stroke();
   }
   const sc = ['#ff5d8f', '#ffd23d', '#5ad1ff', '#7cf08a', '#b48cff', '#ffffff', '#ff9a3d'];
   for (let i = 0; i < 900; i++) {
-    const x = rnd() * WORLD_W, y = rnd() * WORLD_H, a = rnd() * Math.PI;
+    const x = rnd() * AW, y = rnd() * AH, a = rnd() * Math.PI;
     ctx.strokeStyle = sc[i % sc.length]; ctx.lineWidth = 1.8;
     ctx.beginPath(); ctx.moveTo(x - Math.cos(a) * 2.2, y - Math.sin(a) * 2.2); ctx.lineTo(x + Math.cos(a) * 2.2, y + Math.sin(a) * 2.2); ctx.stroke();
   }
@@ -1914,9 +1918,10 @@ const DECOR = {
 const GROUND = { meadow: gMeadow, rooftop: gRooftop, snow: gSnow, night: gNight, beach: gBeach, candy: gCandy };
 const VIG = { meadow: '30,60,20', rooftop: '70,25,40', snow: '60,90,140', night: '5,10,25', beach: '120,80,30', candy: '140,40,100' };
 
-export function renderBackground(themeId, seed, buildings, scale = 1) {
+export function renderBackground(themeId, seed, buildings, scale = 1, w = WORLD_W, h = WORLD_H) {
+  setArtSize(w, h);
   const theme = GROUND[themeId] ? themeId : 'meadow';
-  const c = makeCanvas(WORLD_W * scale, WORLD_H * scale);
+  const c = makeCanvas(AW * scale, AH * scale);
   const ctx = c.getContext('2d');
   ctx.scale(scale, scale);
   const rnd = mulberry32(((seed >>> 0) ^ hashStr(theme)) >>> 0);
@@ -1931,17 +1936,17 @@ export function renderBackground(themeId, seed, buildings, scale = 1) {
   }
   const list = DECOR[theme], tot = list.reduce((a, d) => a + d[1], 0);
   const placed = [];
-  const yMin = theme === 'beach' ? 85 : 30, yMax = theme === 'beach' ? WORLD_H - 70 : WORLD_H - 10;
+  const yMin = theme === 'beach' ? 85 : 30, yMax = theme === 'beach' ? AH - 70 : AH - 10;
   for (let n = 0; n < 70; n++) {
     let pick = rnd() * tot, d = list[0];
     for (const it of list) { pick -= it[1]; if (pick <= 0) { d = it; break; } }
     const tall = !!d[2];
     for (let tries = 0; tries < 30; tries++) {
-      const x = 25 + rnd() * (WORLD_W - 50), y = yMin + rnd() * (yMax - yMin);
+      const x = 25 + rnd() * (AW - 50), y = yMin + rnd() * (yMax - yMin);
       if (blds.some(b => Math.hypot(b.x - x, b.y - y) < b.r + 45 + (tall ? 16 : 4))) continue;
       if (placed.some(p => Math.hypot(p.x - x, p.y - y) < (tall || p.tall ? 46 : 28))) continue;
       if (tall) {
-        const edge = x < 140 || x > WORLD_W - 140 || y < 130 || y > WORLD_H - 90;
+        const edge = x < 140 || x > AW - 140 || y < 130 || y > AH - 90;
         if (!edge && rnd() > 0.12) continue;
         if (segs.some(sg => segDist(x, y, ...sg) < 34)) continue;
       }
@@ -1952,9 +1957,9 @@ export function renderBackground(themeId, seed, buildings, scale = 1) {
   placed.sort((a, b) => a.y - b.y);
   for (const p of placed) p.d[0](ctx, p.x, p.y, p.s, rnd);
   // vignette
-  const g = ctx.createRadialGradient(WORLD_W / 2, WORLD_H / 2, WORLD_H * 0.42, WORLD_W / 2, WORLD_H / 2, WORLD_W * 0.62);
+  const g = ctx.createRadialGradient(AW / 2, AH / 2, AH * 0.42, AW / 2, AH / 2, AW * 0.62);
   g.addColorStop(0, `rgba(${VIG[theme]},0)`); g.addColorStop(1, `rgba(${VIG[theme]},${theme === 'night' ? 0.55 : 0.32})`);
-  ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, AW, AH);
   return c;
 }
 
@@ -1965,7 +1970,7 @@ const AMB = new Float32Array(AMB_N * 6);
 function wrap(v, m) { return ((v % m) + m) % m; }
 export function drawAmbient(ctx, themeId, t) {
   ctx.save();
-  const W = WORLD_W + 40, H = WORLD_H + 40;
+  const W = AW + 40, H = AH + 40;
   switch (themeId) {
     case 'meadow': {
       for (let i = 0; i < 34; i++) {
@@ -2006,8 +2011,8 @@ export function drawAmbient(ctx, themeId, t) {
     case 'night': {
       for (let i = 0; i < 32; i++) {
         const o = i * 6, a = AMB[o], b = AMB[o + 1], c = AMB[o + 2], d = AMB[o + 3], e = AMB[o + 4];
-        const x = a * WORLD_W + Math.sin(t * 0.5 * (0.5 + b) + i) * 40;
-        const y = c * WORLD_H + Math.cos(t * 0.4 * (0.5 + d) + i * 2) * 30;
+        const x = a * AW + Math.sin(t * 0.5 * (0.5 + b) + i) * 40;
+        const y = c * AH + Math.cos(t * 0.4 * (0.5 + d) + i * 2) * 30;
         const p = 0.5 + 0.5 * Math.sin(t * 3 * (0.5 + e) + i * 5);
         ctx.fillStyle = '#e8ff8a';
         ctx.globalAlpha = 0.18 * p; circ(ctx, x, y, 8); ctx.fill();
@@ -2019,14 +2024,14 @@ export function drawAmbient(ctx, themeId, t) {
     case 'beach': {
       for (let i = 0; i < 34; i++) {
         const o = i * 6, a = AMB[o], b = AMB[o + 1], c = AMB[o + 2];
-        const x = a * WORLD_W, y = i % 2 ? c * 55 + 2 : WORLD_H - c * 55 - 2;
+        const x = a * AW, y = i % 2 ? c * 55 + 2 : AH - c * 55 - 2;
         const tw = Math.max(0, Math.sin(t * 2 * (0.6 + b) + i * 3));
         ctx.globalAlpha = tw * tw * tw;
         sparkle(ctx, x + Math.sin(t + i) * 4, y, 3.5, '#ffffff');
       }
       for (let i = 0; i < 16; i++) {
         const o = (i + 34) * 6, a = AMB[o], b = AMB[o + 1], c = AMB[o + 2];
-        const x = a * WORLD_W, y = 90 + c * (WORLD_H - 180);
+        const x = a * AW, y = 90 + c * (AH - 180);
         const tw = Math.max(0, Math.sin(t * 1.6 * (0.6 + b) + i * 2.1));
         ctx.globalAlpha = tw * tw * tw * tw * 0.8;
         sparkle(ctx, x, y, 2.4, '#fff8d8');
@@ -2037,7 +2042,7 @@ export function drawAmbient(ctx, themeId, t) {
       const cols = ['#ffffff', '#fff27a', '#ff9fd0', '#9fe8ff'];
       for (let i = 0; i < 40; i++) {
         const o = i * 6, a = AMB[o], b = AMB[o + 1], c = AMB[o + 2], d = AMB[o + 3];
-        const x = a * WORLD_W + Math.sin(t * 0.7 + i) * 10;
+        const x = a * AW + Math.sin(t * 0.7 + i) * 10;
         const y = wrap(c * H - t * (8 + d * 10), H) - 20;
         const tw = 0.5 + 0.5 * Math.sin(t * 3 * (0.6 + b) + i * 2);
         ctx.globalAlpha = tw;

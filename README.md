@@ -26,7 +26,8 @@ Open http://localhost:8080. To test online play by yourself, open a second brows
 | Core mechanics | Drag-to-send, swipe across buildings for multi-send, 25/50/75/100% send, field battles between squads, towers, Purr Power stars (momentum), catnip spell energy |
 | Solo | 12-level campaign with 3-star ratings, practice vs 4 AI difficulties, live AI battle on the menu background |
 | Progression | Coins, XP & levels, daily gift, first-win bonus, 13 achievements, 15 furs + 12 hats (your whole army wears them), match history |
-| Polish | Procedural art, synthesized music & SFX, spell VFX, screen shake, mobile/touch support, keyboard shortcuts |
+| Polish | Procedural art, synthesized music & SFX, spell VFX, screen shake, keyboard shortcuts |
+| Phones | Own layout, on by default on phones: the field stands up in portrait (your base at the bottom), zooms onto the buildings, big tap zones, thumb dock (send %, 🐾 ALL, spells), compact upgrade bar, hold-to-read spells, vibration, full screen on Android, screen stays awake, back button opens the battle menu. Settings → Battle layout overrides it |
 
 ## How online play works
 

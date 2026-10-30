@@ -29,7 +29,9 @@ body { overscroll-behavior: none; }
 button, input, select { font-family: inherit; }
 kbd { font-family: inherit; }
 
-#game { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; transition: filter .5s; }
+#game { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; touch-action: none; transition: filter .5s; }
+html { -webkit-text-size-adjust: 100%; touch-action: manipulation; }
+body { -webkit-touch-callout: none; }
 #game.attract { filter: saturate(1.05) brightness(0.8) blur(1.2px); }
 
 /* ---------- loader ---------- */
