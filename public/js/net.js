@@ -1,7 +1,8 @@
 // Whisker Wars networking: two interchangeable transports.
 //  - WSTransport: relay through the included Node server (most reliable)
 //  - P2PTransport: direct WebRTC via PeerJS (works on any static website)
-const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+// Room codes are 5 digits: easy to read out and type on a phone's number pad.
+const CODE_ALPHABET = '0123456789';
 export function genCode(n = 5) {
   let c = '';
   const a = new Uint32Array(n);
@@ -9,6 +10,7 @@ export function genCode(n = 5) {
   for (let i = 0; i < n; i++) c += CODE_ALPHABET[a[i] % CODE_ALPHABET.length];
   return c;
 }
+// (letters are still accepted so a room made with an old letter code can be joined)
 export function cleanCode(c) { return String(c || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8); }
 
 class Emitter {
@@ -192,7 +194,7 @@ export async function hostRoom() {
 /** Join a room by code. Tries the relay server first, then peer-to-peer. */
 export async function joinRoom(code, pid) {
   code = cleanCode(code);
-  if (code.length < 4) throw new Error('Room codes are 5 letters/numbers');
+  if (code.length < 4) throw new Error('Room codes are 5 numbers');
   const url = await detectServer();
   let firstErr;
   if (url) {

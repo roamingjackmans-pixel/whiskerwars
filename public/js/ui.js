@@ -357,14 +357,14 @@ SCREENS.friend = (params = {}) => {
       <div class="card panel">
         <div class="big-emoji">🏠</div>
         <h2>Create a room</h2>
-        <p>Get a 5-letter code (and a link) to send to your friend.</p>
+        <p>Get a 5-number code (and a link) to send to your friend.</p>
         <button class="btn primary big create">Create Room</button>
       </div>
       <div class="card panel">
         <div class="big-emoji">🔑</div>
         <h2>Join a room</h2>
         <p>Type the code your friend sent you.</p>
-        <input class="code-in" maxlength="6" placeholder="ABCDE" autocomplete="off" spellcheck="false" value="${esc(params.code || '')}">
+        <input class="code-in" maxlength="6" placeholder="12345" inputmode="numeric" autocomplete="off" spellcheck="false" value="${esc(params.code || '')}">
         <button class="btn primary big join">Join Room</button>
       </div>
     </div>
@@ -381,7 +381,7 @@ SCREENS.friend = (params = {}) => {
   };
   joinBtn.onclick = async () => {
     const code = cleanCode(input.value);
-    if (code.length < 5) { toast('Room codes have 5 letters/numbers', 'warn'); audio.play('error'); return; }
+    if (code.length < 5) { toast('Room codes have 5 numbers', 'warn'); audio.play('error'); return; }
     joinBtn.disabled = true; joinBtn.textContent = 'Joining...';
     try { endSession(); session = await OnlineSession.join(code); go('lobby'); }
     catch (e) {

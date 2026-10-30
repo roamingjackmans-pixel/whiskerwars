@@ -1,7 +1,7 @@
 # 🐱 Whisker Wars
 
 Real-time cat-kingdom strategy for the browser. Drag to send your army of adorable cats, capture cottages,
-cast silly spells and battle your friends online with a 5-letter room code.
+cast silly spells and battle your friends online with a 5-number room code.
 
 **Play:** https://josephjackman.com/whiskerwars/
 
