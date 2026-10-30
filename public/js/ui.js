@@ -10,6 +10,7 @@ import { OnlineSession } from './online.js';
 import { detectServer, cleanCode } from './net.js';
 import { heroPortraitURL, catPreviewURL, buildingPreviewURL } from './art.js';
 import { normalizeObstacles } from '../shared/nav.js';
+import { maskSnap } from '../shared/game.js';
 import { initFriends, presence, friends, addFriend, removeFriend, isFriend, myFriendCode, fmtFriendCode, cleanFriendCode, onFriends, setBusyCheck, recentPlayers, noteRecent, beReachable } from './friends.js';
 import { isPhone, applyDeviceClass, enterFullscreen, keepAwake, deviceSummary, desktopSiteMode } from './device.js';
 import { BUILD, isDev, versionLabel, fetchLatest, isNewer, reloadTo } from './update.js';
@@ -732,9 +733,10 @@ function startOnline() {
   const m = beginMatch({
     mode: 'online', role: 'host', me: 0, cfg,
     send: msg => S.send(msg), getPing: () => S.ping,
+    // every guest gets their own snapshot: enemy building counts are hidden from them
+    sendSnap: out => { for (const [slot, seat] of S.slots) S.send({ type: 'snap', s: maskSnap(out, seat) }, slot); },
   });
-  const first = m.interp.latest;
-  S.send({ type: 'start', info: m.info, snap: { t: first.t, b: first.b, s: first.s, p: first.p, e: [] } });
+  for (const [slot, seat] of S.slots) S.send({ type: 'start', info: m.info, snap: m.currentSnap(seat) }, slot);
   wireSessionToMatch(m);
 }
 function startGuest(msg) {
@@ -783,7 +785,7 @@ function wireSessionToMatch(m) {
       S.on('peer-leave', lost),
       S.on('guest-resume', (seat, slot) => {
         if (m.over) return;
-        S.send({ type: 'start', info: m.info, snap: m.currentSnap(), resume: true }, slot);
+        S.send({ type: 'start', info: m.info, snap: m.currentSnap(seat), resume: true }, slot);
         if (!waits.has(seat)) return;
         waits.delete(seat);
         toast(`😺 ${esc((m.info.players[seat] || {}).name || 'Your friend')} reconnected!`, 'good');

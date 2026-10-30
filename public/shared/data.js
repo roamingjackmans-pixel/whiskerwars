@@ -69,6 +69,10 @@ export const TOWER_REGROW = { rate: BUILDINGS.cottage.prod[0], delay: 4 };
 // (an 8-cat cottage gets back ~0.33 cats/s, a 20-cat one ~0.83, a 45-cat Cat Tree ~1.9).
 export const STRAY_REGROW = { refill: 24, min: 0.3, delay: 4 };
 export const strayRegrowRate = full => Math.max(STRAY_REGROW.min, full / STRAY_REGROW.refill);
+// Nobody can see how many cats are inside another player's buildings (strays stay visible). Every hero can send the
+// Owl Scout: for a few seconds you see every enemy building's count (and their army totals).
+export const SCOUT = { id: 'scout', name: 'Owl Scout', icon: '🦉', cost: 15, cd: 30, dur: 10, target: 'global',
+  desc: 'An owl flies over the battlefield: for 10s you can see how many cats are inside every enemy building.' };
 // Prof. Purrcival's Auto-Turret spell bolts on a fixed-size hairball turret
 export const TURRET = { range: 195, fireEvery: 0.95 };
 // cost (in cats) to convert a building into another type (resets to level 1)

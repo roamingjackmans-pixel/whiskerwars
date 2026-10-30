@@ -3,7 +3,7 @@
 import {
   WORLD_W, WORLD_H, TICK, BASE_SPEED, MAX_CATNIP, BASE_CATNIP_REGEN, START_CATNIP, TIME_LIMIT,
   OVERCAP_DECAY, SQUAD_CHUNK, PURR_PER_STAR, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR,
-  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, TOWER_REGROW, STRAY_REGROW, strayRegrowRate, mulberry32,
+  BTYPES, BUILDINGS, CONVERT_COST, HERO_BY_ID, AI_LEVELS, TURRET, TOWER_REGROW, STRAY_REGROW, strayRegrowRate, SCOUT, mulberry32,
 } from './data.js';
 import { getNav } from './nav.js';
 
@@ -37,7 +37,7 @@ export class Game {
     this.players = cfg.players.map((p, i) => ({
       idx: i, name: p.name || ('Player ' + (i + 1)), heroId: p.hero, hero: HERO_BY_ID[p.hero] || HERO_BY_ID.whiskers,
       fur: p.fur, hat: p.hat, ai: p.ai || null,
-      catnip: START_CATNIP, purr: 10, cds: [0, 0, 0], gcd: 0, alive: true,
+      catnip: START_CATNIP, purr: 10, cds: [0, 0, 0], gcd: 0, alive: true, scoutUntil: 0, scoutCd: 0,
       rally: 0, grog: 0, eclipsed: 0, lastAction: 0, lastEmote: -9,
       bonusProd: p.ai && AI_LEVELS[p.ai] ? (AI_LEVELS[p.ai].bonusProd || 0) : 0,
       stats: { produced: 0, lost: 0, killed: 0, captured: 0, lostBuildings: 0, spells: 0, sent: 0, peakArmy: 0, upgrades: 0, maxCottage: 1 },
@@ -183,6 +183,7 @@ export class Game {
       case 'up': return this.cmdUpgrade(i, c);
       case 'conv': return this.cmdConvert(i, c);
       case 'spell': return this.cmdSpell(i, c);
+      case 'scout': return this.cmdScout(i);
       case 'emote':
         if (this.time - p.lastEmote < 1.2) return;
         p.lastEmote = this.time;
@@ -262,6 +263,20 @@ export class Game {
     b.type = c.to; b.level = 1; b.fireCd = 1;
     this.emit({ k: 'conv', o: i, b: b.id, to: c.to });
   }
+
+  /** Owl Scout: see every enemy building's cats for a few seconds. */
+  cmdScout(i) {
+    const p = this.players[i];
+    if (!p || !p.alive) return;
+    if (p.scoutCd > 0) return this.err(i, 'The owl is resting');
+    if (p.catnip < SCOUT.cost) return this.err(i, `Owl Scout needs ${SCOUT.cost} catnip`);
+    p.catnip -= SCOUT.cost;
+    p.scoutUntil = this.time + SCOUT.dur;
+    p.scoutCd = SCOUT.cd;
+    p.stats.spells++;
+    this.emit({ k: 'scout', o: i });
+  }
+  scouting(i) { const p = this.players[i]; return !!p && p.scoutUntil > this.time; }
 
   // ---------- spells ----------
   cmdSpell(i, c) {
@@ -567,6 +582,7 @@ export class Game {
       p.catnip = Math.min(MAX_CATNIP, p.catnip + this.catnipRegen(p.idx) * dt);
       for (let k = 0; k < 3; k++) if (p.cds[k] > 0) p.cds[k] = Math.max(0, p.cds[k] - dt);
       if (p.gcd > 0) p.gcd = Math.max(0, p.gcd - dt);
+      if (p.scoutCd > 0) p.scoutCd = Math.max(0, p.scoutCd - dt);
       if (t - p.lastAction > 12 && !p.ai) this.addPurr(p.idx, -1 * dt);
     }
 
@@ -758,8 +774,8 @@ export class Game {
       s: this.squads.map(s => [s.id, s.owner, Math.round(s.count * 10) / 10, Math.round(s.x), Math.round(s.y), sfx(s), s.to]),
       p: this.players.map(p => [
         r1(p.catnip), Math.round(p.purr), r1(p.cds[0]), r1(p.cds[1]), r1(p.cds[2]),
-        (p.rally > t ? 1 : 0) | (p.grog > t ? 2 : 0) | (p.eclipsed > t ? 4 : 0),
-        p.alive ? 1 : 0, Math.round(this.armyOf(p.idx)), this.stars(p.idx), r1(p.gcd),
+        (p.rally > t ? 1 : 0) | (p.grog > t ? 2 : 0) | (p.eclipsed > t ? 4 : 0) | (p.scoutUntil > t ? 8 : 0),
+        p.alive ? 1 : 0, Math.round(this.armyOf(p.idx)), this.stars(p.idx), r1(p.gcd), r1(p.scoutCd),
       ]),
       e: this.events,
     };
@@ -767,6 +783,20 @@ export class Game {
     this.events = [];
     return snap;
   }
+}
+
+/**
+ * What one seat may see of a snapshot: the cats inside other players' buildings and their army totals are hidden
+ * (-1) unless that seat's Owl Scout is out. Strays stay visible. seat < 0 (a spectator) sees everything.
+ */
+export function maskSnap(snap, seat) {
+  if (seat == null || seat < 0) return snap;
+  const me = snap.p[seat];
+  if (me && (me[5] & 8)) return snap;
+  const out = { ...snap };
+  out.b = snap.b.map(a => (a[1] >= 0 && a[1] !== seat ? [a[0], a[1], a[2], a[3], -1, ...a.slice(5)] : a));
+  out.p = snap.p.map((a, k) => (k === seat ? a : [...a.slice(0, 7), -1, ...a.slice(8)]));
+  return out;
 }
 
 function roundStats(s) {

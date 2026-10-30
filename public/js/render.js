@@ -278,13 +278,15 @@ export class Renderer {
 
   drawBadge(ctx, b) {
     const c = teamColor(b.owner);
+    // (another player's cats are hidden: count -1, shown as "?" until your Owl Scout flies over)
+    const hidden = b.count < 0;
     const n = Math.floor(b.count);
     const k = this.uiScale;
     const y = b.y + b.radius * 0.62 + 10 * k;
-    const txt = String(n);
+    const txt = hidden ? '?' : String(n);
     ctx.font = FONT(700, 15);
     const w = Math.max(30, ctx.measureText(txt).width + 16);
-    const full = b.owner >= 0 && b.count >= b.cap - 0.01;
+    const full = !hidden && b.owner >= 0 && b.count >= b.cap - 0.01;
     ctx.save();
     if (k !== 1) { ctx.translate(b.x, y); ctx.scale(k, k); ctx.translate(-b.x, -y); }
     ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 2;

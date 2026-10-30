@@ -1,7 +1,7 @@
 // Whisker Wars match controller: runs/receives the simulation, handles input, feeds renderer + HUD.
-import { Game, radiusOf, BFX, SFX } from '../shared/game.js';
+import { Game, radiusOf, BFX, SFX, maskSnap } from '../shared/game.js';
 import { AI } from '../shared/ai.js';
-import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, BASE_SPEED, WORLD_W, WORLD_H, strayRegrowRate } from '../shared/data.js';
+import { TICK, SNAP_EVERY, BTYPES, BUILDINGS, HERO_BY_ID, PURR_ATK_PER_STAR, PURR_SPD_PER_STAR, BASE_SPEED, WORLD_W, WORLD_H, strayRegrowRate, SCOUT } from '../shared/data.js';
 import { Renderer, spellTargetOk } from './render.js';
 import { Hud } from './hud.js';
 import { audio } from './audio.js';
@@ -90,7 +90,8 @@ export class Match {
       this.info = this.game.staticInfo();
       this.ais = [];
       this.game.players.forEach((p, i) => { if (p.ai) this.ais.push(new AI(this.game, i, p.ai)); });
-      this.interp.push(this.game.snapshot());
+      this.full = this.game.snapshot();
+      this.interp.push(this.viewOf(this.full));
     } else {
       this.info = opts.info;
       if (opts.firstSnap) this.interp.push(opts.firstSnap);
@@ -209,14 +210,18 @@ export class Match {
       if (this.metro) { this.metro.stop(); this.metro = null; }
     }
   }
+  /** What this player may see: other players' building counts are hidden unless their Owl Scout is out. */
+  viewOf(snap) { return this.role !== 'guest' && this.me >= 0 ? maskSnap(snap, this.me) : snap; }
   publish(snap, force) {
-    this.interp.push(snap);
+    this.full = snap;
+    this.interp.push(this.viewOf(snap));
     if (this.role === 'host' && this.opts.send) {
       if (snap.e.length) this.remoteEvents.push(...snap.e);
       if (this.game.tickNo % SNAP_EVERY === 0 || force) {
         const out = { t: snap.t, b: snap.b, s: snap.s, p: snap.p, e: this.remoteEvents };
         if (snap.over) out.over = snap.over;
-        this.opts.send({ type: 'snap', s: out });
+        // each guest gets their own copy, with the counts they may not see taken out
+        if (this.opts.sendSnap) this.opts.sendSnap(out); else this.opts.send({ type: 'snap', s: out });
         this.remoteEvents = [];
       }
     }
@@ -234,7 +239,7 @@ export class Match {
   get canPause() { return this.role === 'local'; }
   setPaused(v) { if (this.canPause) this.paused = !!v; }
   netPause(v) { this.paused = !!v; }
-  currentSnap() { const s = this.interp.latest; return { t: s.t, b: s.b, s: s.s, p: s.p, e: [] }; }
+  currentSnap(seat) { const s = seat != null && this.full ? maskSnap(this.full, seat) : this.interp.latest; return { t: s.t, b: s.b, s: s.s, p: s.p, e: [] }; }
 
   // network entry points
   remoteCommand(c, from = 1) { if (this.game && !this.game.over) this.game.command(from, c); }
@@ -282,7 +287,7 @@ export class Match {
       const [id, owner, ti, level, count, fx, cap, hackBy, full] = arr;
       const p = pos.get(id);
       const prev = a._b.get(id);
-      const c = prev && prev[1] === owner ? prev[4] + (count - prev[4]) * u : count;
+      const c = prev && prev[1] === owner && count >= 0 && prev[4] >= 0 ? prev[4] + (count - prev[4]) * u : count;
       const type = BTYPES[ti];
       const o = { id, x: p.x, y: p.y, owner, type, level, count: c, fx, cap, hackBy, full: full || 0, radius: radiusOf(type, level) * art };
       buildings.push(o); byId.set(id, o);
@@ -303,7 +308,7 @@ export class Match {
       const o = { id, owner, count, x: sx, y: sy, fx, to };
       squads.push(o); squadById.set(id, o);
     }
-    const players = b.p.map(arr => ({ catnip: arr[0], purr: arr[1], cds: [arr[2], arr[3], arr[4]], buffs: arr[5], alive: arr[6], army: arr[7], stars: arr[8], gcd: arr[9] }));
+    const players = b.p.map(arr => ({ catnip: arr[0], purr: arr[1], cds: [arr[2], arr[3], arr[4]], buffs: arr[5], alive: arr[6], army: arr[7], stars: arr[8], gcd: arr[9], scoutCd: arr[10] || 0, scouting: !!(arr[5] & 8) }));
     return { t: a.t + (b.t - a.t) * u, buildings, byId, squads, squadById, players, timeLimit: this.info.timeLimit };
   }
 
@@ -323,6 +328,7 @@ export class Match {
         break;
       case 'fight': audio.play('fight', { vol: 0.55 }); break;
       case 'shot': audio.play('shot', { vol: 0.28 }); break;
+      case 'scout': if (e.o === me) { audio.play('star'); this.hud && this.hud.toast(`🦉 Owl Scout: enemy cats are visible for ${SCOUT.dur}s`); } break;
       case 'up': audio.play('upgrade', { vol: e.o === me ? 0.8 : 0.4 }); break;
       case 'conv': audio.play('convert', { vol: e.o === me ? 0.8 : 0.4 }); break;
       case 'star': if (e.o === me) audio.play('star'); break;
@@ -416,6 +422,7 @@ export class Match {
           if (b) { n += Math.floor(b.count * this.pct); if (nav) walk = Math.max(walk, nav.len(id, tb.id)); }
         }
         if (tb.owner === this.me) ui.prediction = { text: `+${n} 🐾`, neutral: true };
+        else if (tb.count < 0) ui.prediction = { text: `${n} ⚔ ?`, neutral: true };   // enemy cats hidden (send the 🦉 Owl Scout)
         else {
           // an enemy building keeps making kittens while your cats walk the long way round
           let defenders = tb.count;
@@ -505,6 +512,8 @@ export class Match {
     else { audio.play('error'); this.hud.toast('Pick a highlighted building', 'warn'); }
   }
   upgrade(id) { this.sendCmd({ k: 'up', b: id }); }
+  /** Send the Owl Scout: see every enemy building's cats for a few seconds. */
+  scout() { audio.init(); this.sendCmd({ k: 'scout' }); }
   convert(id, to) { this.sendCmd({ k: 'conv', b: id, to }); this.closeMenu(); }
   emote(id) { this.sendCmd({ k: 'emote', id }); }
   surrender() { this.sendCmd({ k: 'surrender' }); }
@@ -601,6 +610,7 @@ export class Match {
       if (this.over || ev.target.tagName === 'INPUT') return;
       const k = ev.key.toLowerCase();
       if (k === '1' || k === '2' || k === '3') this.selectSpell(+k - 1);
+      else if (k === '4') this.scout();
       else if (k === 'q') this.setPct(0.25); else if (k === 'w') this.setPct(0.5); else if (k === 'e') this.setPct(0.75); else if (k === 'r') this.setPct(1);
       else if (k === 'escape') this.cancelAll();
       else if (k === 'u' && this.ui.hover != null) { const b = this.view.byId.get(this.ui.hover); if (b && b.owner === this.me) this.upgrade(b.id); }

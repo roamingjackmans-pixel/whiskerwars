@@ -1,5 +1,5 @@
 // Whisker Wars - computer opponent. Runs on the authority, issues normal commands.
-import { BUILDINGS, AI_LEVELS, BASE_SPEED, STRAY_REGROW, strayRegrowRate } from './data.js';
+import { BUILDINGS, AI_LEVELS, BASE_SPEED, STRAY_REGROW, strayRegrowRate, SCOUT } from './data.js';
 
 // buildings are compared by how far a cat has to WALK (around ponds, walls and mounds), not as the crow flies
 
@@ -12,10 +12,61 @@ export class AI {
     this.L = AI_LEVELS[level] || AI_LEVELS.normal;
     this.timer = 1.5 + Math.random();
     this.preferSource = -1;
+    this.initIntel();
+  }
+
+  // ---------- what it knows about rival buildings ----------
+  // Nobody can see how many cats are inside another player's buildings, the computer included (see SCOUT in
+  // data.js). It remembers the last count it saw, adds the kittens a building could have made since, takes away
+  // the squads it watches leave and adds the ones it watches arrive. Its Owl Scout shows everything again.
+  initIntel() {
+    this.seen = new Map();     // building id -> { c: cats, t: when, o: owner then }
+    for (const b of this.g.buildings) this.seen.set(b.id, { c: b.count, t: this.g.time, o: b.owner });
+    this.watch = new Map();    // squad id -> { to, count, owner } for squads on the field
+  }
+  visible(b) { return b.owner === this.i || b.owner < 0 || this.g.scouting(this.i); }
+  /** How many cats this AI thinks are in building b (the real number for its own buildings and strays). */
+  est(b) {
+    if (this.visible(b)) return b.count;
+    const s = this.seen.get(b.id);
+    if (!s) return b.count;
+    const cap = this.g.cap(b), prod = BUILDINGS[b.type].prod[b.level - 1] || 0;
+    return s.c >= cap ? s.c : Math.min(cap, s.c + prod * (this.g.time - s.t));
+  }
+  updateIntel() {
+    const g = this.g, t = g.time;
+    for (const b of g.buildings) {
+      const s = this.seen.get(b.id);
+      if (!s) { this.seen.set(b.id, { c: b.count, t, o: b.owner }); continue; }
+      if (this.visible(b)) { s.c = b.count; s.t = t; s.o = b.owner; }
+      else if (s.o !== b.owner) { s.c = 4; s.t = t; s.o = b.owner; }   // just changed hands: a few cats left over (a guess)
+    }
+    const here = new Set();
+    for (const q of g.squads) {
+      here.add(q.id);
+      if (!this.watch.has(q.id)) {
+        // a rival squad leaving one of its buildings takes cats out of it
+        const fb = g.byId.get(q.from), sf = fb && this.seen.get(fb.id);
+        if (sf && q.owner !== this.i && fb.owner === q.owner && !this.visible(fb)) { sf.c = Math.max(0, this.est(fb) - q.count); sf.t = t; }
+      }
+      this.watch.set(q.id, { to: q.to, count: q.count, owner: q.owner });
+    }
+    for (const [id, w] of this.watch) {
+      if (here.has(id)) continue;
+      this.watch.delete(id);
+      const tb = g.byId.get(w.to), st = tb && this.seen.get(tb.id);
+      if (!st || this.visible(tb) || tb.owner !== st.o) continue;
+      if (w.owner === tb.owner) { st.c = this.est(tb) + w.count; st.t = t; }   // a rival reinforcing its own building
+      else if (w.owner === this.i) {
+        // my attack bounced off: it held, so what is left is what I guessed minus what I hit it with (at least a few)
+        st.c = Math.max(2, this.est(tb) - w.count * g.attack(this.i, null, true) / g.defense(tb)); st.t = t;
+      }
+    }
   }
 
   update(dt) {
     if (this.g.over || !this.g.players[this.i].alive) return;
+    this.updateIntel();
     this.timer -= dt;
     if (this.timer > 0) return;
     this.timer = this.L.think * (0.75 + Math.random() * 0.5);
@@ -47,6 +98,11 @@ export class AI {
     }
     this.threatened = threatened;
 
+    // now and then send the Owl Scout to see what the rivals really have
+    const P = g.players[me];
+    if (P.scoutCd <= 0 && P.catnip >= SCOUT.cost + 25 && g.time - (this.lastScout ?? -99) > 40 && Math.random() < 0.3 + this.L.spellUse * 0.5) {
+      this.cmd({ k: 'scout' }); this.lastScout = g.time;
+    }
     if (Math.random() < this.L.spellUse) this.trySpells(mine);
     this.defend(mine);
     if (Math.random() < this.L.upgrade) this.tryUpgrade(mine);
@@ -105,7 +161,7 @@ export class AI {
     let shots = 0;
     for (const t of g.buildings) {
       const def = BUILDINGS[t.type];
-      if (!def.range || (t.owner < 0 && t.type !== 'tower') || t.owner === this.i || t.count < 1 || t === to) continue;
+      if (!def.range || (t.owner < 0 && t.type !== 'tower') || t.owner === this.i || this.est(t) < 1 || t === to) continue;
       const range = def.range[t.level - 1];
       let inRange = 0;
       for (let k = 1; k < route.length; k++) inRange += chordIn(t, range, route[k - 1], route[k]);
@@ -150,7 +206,7 @@ export class AI {
           : tg.count < tg.full ? Math.min(tg.full - tg.count, strayRegrowRate(tg.full) * Math.max(0, eta - Math.max(0, STRAY_REGROW.delay - (g.time - tg.lastHit)))) : 0;
         const theirReinf = this.reinf.get(tg.id) || 0;
         const already = [...g.squads].filter(q => q.owner === me && q.to === tg.id).reduce((a, q) => a + q.count, 0);
-        let need = ((tg.count + prod + theirReinf) * def / atk) * (1.12 + (1 - aggr) * 0.35) + 2 + this.towerLoss(s.b, tg) - already;
+        let need = ((this.est(tg) + prod + theirReinf) * def / atk) * (1.12 + (1 - aggr) * 0.35) + 2 + this.towerLoss(s.b, tg) - already;
         if (Math.random() < this.L.mistakes) need *= 0.7;
         // cats already on the way (nearly) cover it: don't drip-feed tiny squads in after them. Trickles get eaten
         // one by one while the defender tops up, and on long roads that can go on for the whole match.
@@ -266,13 +322,13 @@ export class AI {
         return b ? { b: b.id } : null;
       }
       case 'shadowstep': return null; // used together with attacks
-      case 'shuriken': { const b = maxBy(enemyB, x => x.count); return b && b.count >= 18 ? { b: b.id } : null; }
-      case 'cannon': { const b = maxBy(enemyB, x => x.count + (BUILDINGS[x.type].range ? 10 : 0)); return b && b.count >= 12 ? { b: b.id } : null; }
-      case 'orbital': { const b = maxBy(enemyB, x => x.count); return b && b.count >= 26 ? { b: b.id } : null; }
-      case 'curse': { const b = maxBy(enemyB.filter(x => BUILDINGS[x.type].prod[0] > 0), x => x.level + x.count / 20); return b ? { b: b.id } : null; }
-      case 'sardines': { const b = maxBy(enemyB, x => x.count); return b && b.count >= 20 ? { b: b.id } : null; }
+      case 'shuriken': { const b = maxBy(enemyB, x => this.est(x)); return b && this.est(b) >= 18 ? { b: b.id } : null; }
+      case 'cannon': { const b = maxBy(enemyB, x => this.est(x) + (BUILDINGS[x.type].range ? 10 : 0)); return b && this.est(b) >= 12 ? { b: b.id } : null; }
+      case 'orbital': { const b = maxBy(enemyB, x => this.est(x)); return b && this.est(b) >= 26 ? { b: b.id } : null; }
+      case 'curse': { const b = maxBy(enemyB.filter(x => BUILDINGS[x.type].prod[0] > 0), x => x.level + this.est(x) / 20); return b ? { b: b.id } : null; }
+      case 'sardines': { const b = maxBy(enemyB, x => this.est(x)); return b && this.est(b) >= 20 ? { b: b.id } : null; }
       case 'hack': {
-        const towers = enemyB.filter(x => BUILDINGS[x.type].range && x.count >= 1);
+        const towers = enemyB.filter(x => BUILDINGS[x.type].range && this.est(x) >= 1);
         const b = maxBy(towers, x => g.squads.filter(s => s.owner !== me && Math.hypot(s.x - x.x, s.y - x.y) < 260).length + Math.random());
         return b ? { b: b.id } : null;
       }
@@ -281,7 +337,7 @@ export class AI {
         const b = maxBy(c, x => (x.owner >= 0 ? 10 : 0) - Math.min(...mine.map(m => g.pathLen(m, x))) / 100);
         return b ? { b: b.id } : null;
       }
-      case 'beckon': { const b = maxBy(notMine, x => x.count); return b && b.count >= 14 ? { b: b.id } : null; }
+      case 'beckon': { const b = maxBy(notMine, x => this.est(x)); return b && this.est(b) >= 14 ? { b: b.id } : null; }
       case 'bribe': {
         const c = g.buildings.filter(x => x.owner < 0 && x.count <= sp.max && x.count >= 8);
         const b = maxBy(c, x => this.value(x) * x.count - Math.min(...mine.map(m => g.pathLen(m, x))) / 50);

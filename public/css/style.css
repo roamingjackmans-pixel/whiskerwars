@@ -487,6 +487,9 @@ table.stats td:not(:first-child), table.stats th { text-align: center; font-weig
 .bm-up.off, .bm-conv button.off { filter: grayscale(.8); opacity: .6; }
 .bm-max { text-align: center; color: var(--gold-d); font-weight: 700; }
 .bm-conv-l { font-size: 12px; margin: 8px 0 4px; color: var(--ink2); }
+/* Owl Scout: a little smaller than the hero's spells; glows while the owl is out */
+.spell.scout { transform: scale(.86); transform-origin: bottom center; }
+.spell.scout.active { box-shadow: 0 0 0 3px #ffe27a, 0 0 16px rgba(255, 226, 122, .8); }
 /* "change this building into...?" confirm step */
 .bm-ask { display: flex; gap: 6px; margin-top: 8px; }
 .bm-ask button { border: 0; border-radius: 12px; padding: 8px 10px; font-weight: 700; font-size: 15px; cursor: pointer; }

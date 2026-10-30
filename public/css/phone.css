@@ -177,3 +177,19 @@ html.phone .setup .btn.huge.start {
 }
 html.phone .screens { padding-left: calc(env(safe-area-inset-left) + 12px); padding-right: calc(env(safe-area-inset-right) + 12px); }
 html.phone .lobby-bar { padding-bottom: calc(env(safe-area-inset-bottom) + 10px); }
+/* Owl Scout sits with the spells: a slimmer button so the row still fits a narrow phone */
+.hud.phone .spell.scout { transform: none; }
+.hud.phone .spell.scout .sicon { font-size: 22px; }
+.hud.phone.portrait .ph-row { gap: 4px; }
+.hud.phone.portrait .ph-row .spells { gap: 3px; }
+.hud.phone.portrait .spell { width: 50px; }
+.hud.phone.portrait .spell.scout { width: 42px; }
+/* landscape: four buttons down the right edge, so they get a little shorter and the emote/menu pair moves down */
+.hud.phone.landscape .spell { height: 48px; }
+.hud.phone.landscape .spell.scout { height: 40px; }
+.hud.phone.landscape .ph-actions { top: calc(50% + 106px); }
+@media (max-height: 340px) {
+  .hud.phone.landscape .spell { height: 44px; }
+  .hud.phone.landscape .spell.scout { height: 38px; }
+  .hud.phone.landscape .ph-actions { top: calc(50% + 103px); }
+}
