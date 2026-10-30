@@ -177,7 +177,7 @@ export function recordMatch(r) {
 }
 
 export function publicProfile() {
-  return { id: P.id, name: P.name, level: P.level, hero: P.equip.hero, fur: P.equip.fur, hat: P.equip.hat, heroes: P.heroes.slice() };
+  return { id: P.id, name: P.name, level: P.level, hero: P.equip.hero, fur: P.equip.fur, hat: P.equip.hat, heroes: P.heroes.slice(), fc: P.friendCode || '' };
 }
 export function setSetting(k, v) { P.settings[k] = v; changed(); }
 export function heroUnlocked(id) { return P.heroes.includes(id) || (HERO_BY_ID[id] && HERO_BY_ID[id].cost === 0); }
