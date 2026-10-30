@@ -27,7 +27,7 @@ let totalConnections = 0;
 function newCode() {
   for (let n = 0; n < 1000; n++) {
     let c = '';
-    for (let i = 0; i < 5; i++) c += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+    for (let i = 0; i < 5; i++) c += i === 0 ? String(1 + Math.floor(Math.random() * 9)) : CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]; // never starts with 0
     if (!rooms.has(c)) return c;
   }
   throw new Error('no codes left');

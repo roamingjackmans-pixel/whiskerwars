@@ -7,7 +7,7 @@ export function genCode(n = 5) {
   let c = '';
   const a = new Uint32Array(n);
   crypto.getRandomValues(a);
-  for (let i = 0; i < n; i++) c += CODE_ALPHABET[a[i] % CODE_ALPHABET.length];
+  for (let i = 0; i < n; i++) c += i === 0 ? String(1 + (a[i] % 9)) : CODE_ALPHABET[a[i] % CODE_ALPHABET.length]; // never starts with 0
   return c;
 }
 // (letters are still accepted so a room made with an old letter code can be joined)
