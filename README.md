@@ -3,7 +3,9 @@
 Real-time cat-kingdom strategy for the browser. Drag to send your army of adorable cats, capture cottages,
 cast silly spells and battle your friends online with a 5-number room code.
 
-**Play:** https://josephjackman.com/whiskerwars/
+**Not on the site any more:** josephjackman.com now has only
+[Alt Whisker Wars](https://josephjackman.com/altwhiskerwars/), and `/whiskerwars/` sends visitors there.
+Pushing to `main` no longer publishes this game (see Deploying). Run it locally to play.
 
 ## Play locally
 
@@ -54,10 +56,11 @@ they keep a small PeerJS "presence" peer open while the game is open, and an inv
 Upload the contents of `public/` to any web host (GitHub Pages, Netlify, Cloudflare Pages, your own site,
 or a sub-folder of one). It runs in peer-to-peer mode. Done.
 
-This repo already does this: `.github/workflows/pages.yml` publishes `public/` to GitHub Pages on every
-push to `main`. The site appears under the account's custom domain at `/whiskerwars/` because the repo
-is named `whiskerwars`.
-Each deploy stamps the version shown on the home screen, e.g. `v1.3.42 · 1a2b3c4`: major.minor come from
+This repo used to do this: `.github/workflows/pages.yml` published `public/` to GitHub Pages on every
+push to `main`, at `/whiskerwars/` under the account's custom domain because the repo is named `whiskerwars`.
+It now publishes only `retired/`, a page that sends visitors to `/altwhiskerwars/`. To put the game back,
+restore the earlier version of `pages.yml` (`git log -- .github/workflows/pages.yml`).
+Each deploy of the game stamped the version shown on the home screen, e.g. `v1.3.42 · 1a2b3c4`: major.minor come from
 `package.json`, the last number counts commits, and the 7 characters are the commit.
 
 ### Option B — Node server (most reliable online play)

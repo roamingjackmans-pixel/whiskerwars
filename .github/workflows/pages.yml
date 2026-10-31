@@ -1,4 +1,8 @@
-# Publishes the public/ folder to GitHub Pages on every push to main.
+# Whisker Wars is no longer on the site: josephjackman.com shows Alt Whisker Wars instead.
+# On every push to main this publishes only retired/, a page that sends anyone who opens
+# /whiskerwars/ (old links, installed apps) to /altwhiskerwars/.
+# To put the game back, restore the previous version of this file (git log -- .github/workflows/pages.yml),
+# which published public/ with the peer-to-peer and version-stamp steps.
 name: Deploy to GitHub Pages
 
 on:
@@ -23,21 +27,9 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0   # full history: the version number counts commits
       - uses: actions/configure-pages@v5
-      # Pages only serves static files, so play peer-to-peer there.
-      # A custom wss:// server URL in config.js is left alone.
-      - name: Use peer-to-peer mode
-        run: |
-          sed -i "s/server: 'auto'/server: 'p2p'/" public/config.js
-          grep -n "server:" public/config.js
-      # Version stamp for the home screen, and build-unique file URLs so phones never run stale code.
-      - name: Stamp version
-        run: |
-          node tools/stamp-build.mjs public "${GITHUB_SHA::7}"
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: public
+          path: retired
       - id: deployment
         uses: actions/deploy-pages@v4
